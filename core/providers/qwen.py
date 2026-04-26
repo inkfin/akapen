@@ -173,6 +173,12 @@ class QwenProvider(Provider):
     def _translate_error(exc: Exception, model: str) -> str:
         """把 DashScope / OpenAI SDK 的英文报错翻成中文短提示。"""
         msg = str(exc)
+        # APIConnectionError 默认 str 只给 "Connection error."，把底层 httpx 异常也带出来，
+        # 否则代理 / DNS / SSL 问题完全没法 debug。
+        cause = exc.__cause__ or exc.__context__
+        if cause and str(cause) and str(cause) != msg:
+            msg = f"{msg} | cause: {type(cause).__name__}: {cause}"
+
         if "Model.AccessDenied" in msg or "AccessDenied" in msg:
             return (
                 f"百炼账号没有调用 `{model}` 的权限。"
@@ -185,4 +191,10 @@ class QwenProvider(Provider):
             return f"百炼限流（QPS / 配额超限）：{msg[:200]}"
         if "Model.NotFound" in msg or ("InvalidParameter" in msg and "model" in msg.lower()):
             return f"百炼上没有 `{model}` 这个模型 ID，请在「设置」里换一个。"
-        return f"Qwen 调用失败：{exc}"
+        if "Connection error" in msg or "ConnectError" in msg or "ProxyError" in msg:
+            return (
+                f"无法连接百炼（{msg[:200]}）；"
+                f"如果设了 HTTP_PROXY / HTTPS_PROXY 但代理白名单里没放 dashscope.aliyuncs.com，"
+                f"会全部失败——清掉代理或加白名单再试。"
+            )
+        return f"Qwen 调用失败：{msg[:300]}"
