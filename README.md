@@ -33,11 +33,18 @@ python app.py
 - 日语手写实测好，对涂改 / 插字 / 划线推理够用。
 - 价格便宜，`qwen3-vl-plus` 比 `gemini-3.1-pro` 便宜 ~5×；用 batch 还能再 5 折。
 
-| Provider | 模型示例 | 备注 |
-| --- | --- | --- |
-| `qwen`（默认） | `qwen3-vl-plus` / `qwen3-vl-flash` / `qwen3-vl-235b-a22b-thinking` | 阿里云百炼，OpenAI 兼容协议 |
-| `gemini` | `gemini-2.5-flash` / `gemini-3.1-pro` | 海外 |
-| `claude` | `claude-sonnet-4-5` 等 | 仅批改可选 |
+| Provider | 视觉（OCR / 看图批改） | 纯文本（仅批改） | 备注 |
+| --- | --- | --- | --- |
+| `qwen`（默认） | `qwen3-vl-plus` / `qwen3-vl-flash` | `qwen3.6-plus` / `qwen3.6-flash` / `qwen3.5-plus` / `qwen3.5-flash` | 阿里云百炼 OpenAI 兼容协议；纯文本模型选了会自动跳过附图 |
+| `gemini` | `gemini-3.1-pro` / `gemini-2.5-pro` / `gemini-2.5-flash` / `gemini-2.5-flash-lite` | — | 海外 |
+| `claude` | `claude-sonnet-4-5` / `claude-opus-4-5` / `claude-haiku-4-5` | — | 仅批改可选 |
+
+> 百炼上 `qwen3-vl-235b-a22b-instruct/-thinking`、`qwen-vl-max-latest`、`qwen-vl-ocr-latest`
+> 这些不在默认开通范围里，需要单独在「模型广场」申请；申请到之后直接在 UI 模型框
+> 粘贴 ID 即可（dropdown 都开了 `allow_custom_value`）。
+>
+> ⚠ Qwen3-VL 系列**没有 max** 这一档，旗舰就是 `qwen3-vl-plus`；UI 上看到的「Max」
+> 一般是旧 Qwen2-VL 时代的 `qwen-vl-max-latest`，不要混淆。
 
 申请百炼 Key：<https://bailian.console.aliyun.com/> → API-KEY 管理 → 创建。
 Key 形如 `sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`。
@@ -70,26 +77,34 @@ data/input/
 
 ```
 .
-├── app.py                # Gradio UI 入口
+├── app.py                  # Gradio UI 入口
 ├── core/
-│   ├── config.py         # 设置加载/保存（含 DashScope key/base_url）
-│   ├── filenames.py      # 学生文件夹扫描
-│   ├── imageproc.py      # 图片标准化 + 压缩
-│   ├── qwen.py           # 阿里云百炼 / DashScope OpenAI 兼容客户端
-│   ├── ocr.py            # 多页 OCR：qwen / gemini provider 路由
-│   ├── grader.py         # qwen / claude / gemini 批改（多模态：图 + OCR 草稿）
-│   ├── storage.py        # 学生 record 持久化
-│   └── logger.py         # 日志（写到 data/logs/app.log）
+│   ├── config.py           # Settings + UI 模型 catalog
+│   ├── providers/          # LLM provider 抽象层（详见 AGENTS.md）
+│   │   ├── base.py         #   Provider ABC + ProviderError
+│   │   ├── qwen.py         #   QwenProvider（阿里云百炼，OpenAI 兼容协议）
+│   │   ├── gemini.py       #   GeminiProvider
+│   │   ├── claude.py       #   ClaudeProvider
+│   │   └── __init__.py     #   make_provider(name, settings) 工厂
+│   ├── ocr.py              # OCR 业务逻辑（provider-agnostic）
+│   ├── grader.py           # 批改业务逻辑（vision/text 模式自动切换）
+│   ├── filenames.py        # 学生文件夹扫描
+│   ├── imageproc.py        # 图片标准化 + 压缩
+│   ├── storage.py          # 学生 record 持久化
+│   └── logger.py           # 日志（写到 data/logs/app.log）
 ├── prompts/
-│   ├── ocr.md            # OCR 默认 prompt
-│   └── grading.md        # 批改默认 prompt（含 30 分评分标准）
+│   ├── ocr.md              # OCR 默认 prompt
+│   └── grading.md          # 批改默认 prompt（含 30 分评分标准）
 ├── data/
-│   ├── input/            # 学生作文输入目录（按上面的格式）
-│   ├── records/          # 每位学生一个 record JSON
-│   ├── exports/          # 导出的 Markdown
-│   └── logs/             # 持久化运行日志
+│   ├── input/              # 学生作文输入目录（按上面的格式）
+│   ├── records/            # 每位学生一个 record JSON
+│   ├── exports/            # 导出的 Markdown
+│   └── logs/               # 持久化运行日志
+├── AGENTS.md               # 给 AI 改这个仓库时看的架构指南
 └── requirements.txt
 ```
+
+新增一个 LLM provider（例如 OpenAI / 火山引擎 / 本地 vLLM）的步骤详见 `AGENTS.md`。
 
 ## 默认模型 & 思考策略
 
@@ -99,7 +114,8 @@ data/input/
   学生写错的地方"修正"成正确的，导致批改时漏扣分。
 - **批改**：默认同样 `qwen3-vl-plus` + **多模态**。批改模型同时收到 OCR 草稿和
   **学生原图**，会先看图核对 OCR、补全 `[?]`、剔除印刷干扰，再依据校对后的文本评分。
-  想换更强的推理模型可改成 `qwen3-vl-235b-a22b-thinking`，或切到 `claude-sonnet-4-5` /
+  想省钱可换 `qwen3.6-plus`/`qwen3.5-plus` 等纯文本模型（自动不附图、只读 OCR 草稿）；
+  想要更强推理可申请 `qwen3-vl-235b-a22b-thinking`，或切到 `claude-sonnet-4-5` /
   `gemini-3.1-pro`。
 
 ## 图片预处理

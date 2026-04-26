@@ -32,6 +32,7 @@ from core.filenames import scan_folder
 from core.grader import GradingError, grade
 from core.logger import LOG_FILE, clear_log, setup_logging, tail_log
 from core.ocr import OCRError, transcribe
+from core.providers import make_provider
 from core.storage import StudentRecord, extract_score, make_key
 
 logger = setup_logging()
@@ -42,7 +43,7 @@ logger = setup_logging()
 def save_settings(
     gemini_key, anthropic_key, dashscope_key, dashscope_base_url,
     ocr_provider, ocr_model,
-    grading_provider, grading_model,
+    grading_provider, grading_model, grading_thinking,
     ocr_prompt, grading_prompt,
     ocr_concurrency, grading_concurrency,
     ocr_timeout, grading_timeout, max_attempts,
@@ -56,6 +57,7 @@ def save_settings(
     s.ocr_model = (ocr_model or "").strip()
     s.grading_provider = grading_provider
     s.grading_model = (grading_model or "").strip()
+    s.grading_thinking = bool(grading_thinking)
     s.ocr_prompt = ocr_prompt
     s.grading_prompt = grading_prompt
     s.ocr_concurrency = max(1, int(ocr_concurrency))
@@ -66,7 +68,8 @@ def save_settings(
     s.save()
     logger.info(
         f"设置已保存 OCR(并发={s.ocr_concurrency}, timeout={s.ocr_timeout_sec}s) "
-        f"批改(并发={s.grading_concurrency}, timeout={s.grading_timeout_sec}s)"
+        f"批改(并发={s.grading_concurrency}, timeout={s.grading_timeout_sec}s, "
+        f"thinking={s.grading_thinking})"
     )
     return "✅ 已保存设置到 data/settings.json"
 
@@ -77,9 +80,15 @@ def reset_prompts():
     return ocr, grading
 
 
-def _on_provider_change(provider: str):
-    """切 provider 时把模型下拉的 choices 也换成对应的清单，并选第一个作为默认值。"""
-    choices = models_for(provider)
+def _on_ocr_provider_change(provider: str):
+    """切 OCR provider：模型下拉换成对应那一栏的视觉模型。"""
+    choices = models_for(provider, kind="ocr")
+    return gr.update(choices=choices, value=choices[0] if choices else "")
+
+
+def _on_grading_provider_change(provider: str):
+    """切批改 provider：含视觉 + 纯文本两类。"""
+    choices = models_for(provider, kind="grading")
     return gr.update(choices=choices, value=choices[0] if choices else "")
 
 
@@ -173,6 +182,9 @@ def run_ocr_batch(selected_keys, progress=gr.Progress(track_tqdm=False)):
         records, selected_keys,
         only_filter=lambda r: r.ocr_status != "done",
     )
+    # Provider 构造一次，在并发的 work 闭包里复用——它本身只是个轻量配置载体，
+    # 真正的 SDK client 在每次 chat() 内部按需新建。
+    ocr_provider = make_provider(s.ocr_provider, s)
 
     def work(rec: StudentRecord) -> bool:
         rec.ocr_status = "running"
@@ -181,11 +193,11 @@ def run_ocr_batch(selected_keys, progress=gr.Progress(track_tqdm=False)):
         try:
             text = transcribe(
                 rec.existing_image_paths(),
-                provider=s.ocr_provider, model=s.ocr_model, prompt=s.ocr_prompt,
-                gemini_api_key=s.gemini_api_key,
-                dashscope_api_key=s.dashscope_api_key,
-                dashscope_base_url=s.dashscope_base_url,
-                timeout_sec=s.ocr_timeout_sec, max_attempts=s.max_attempts,
+                provider=ocr_provider,
+                model=s.ocr_model,
+                prompt=s.ocr_prompt,
+                timeout_sec=s.ocr_timeout_sec,
+                max_attempts=s.max_attempts,
                 label=rec.folder_name,
             )
         except Exception as e:
@@ -214,6 +226,7 @@ def run_grading_batch(selected_keys, progress=gr.Progress(track_tqdm=False)):
         only_filter=lambda r: r.transcription and r.grading_status != "done",
     )
     targets = [r for r in targets if r.transcription]
+    grading_provider = make_provider(s.grading_provider, s)
 
     def work(rec: StudentRecord) -> bool:
         rec.grading_status = "running"
@@ -222,15 +235,15 @@ def run_grading_batch(selected_keys, progress=gr.Progress(track_tqdm=False)):
         try:
             md = grade(
                 transcription=rec.transcription,
-                student_id=rec.student_id, student_name=rec.student_name,
-                provider=s.grading_provider, model=s.grading_model,
+                student_id=rec.student_id,
+                student_name=rec.student_name,
+                provider=grading_provider,
+                model=s.grading_model,
                 prompt_template=s.grading_prompt,
                 image_paths=rec.existing_image_paths(),
-                gemini_api_key=s.gemini_api_key,
-                anthropic_api_key=s.anthropic_api_key,
-                dashscope_api_key=s.dashscope_api_key,
-                dashscope_base_url=s.dashscope_base_url,
-                timeout_sec=s.grading_timeout_sec, max_attempts=s.max_attempts,
+                thinking=s.grading_thinking,
+                timeout_sec=s.grading_timeout_sec,
+                max_attempts=s.max_attempts,
             )
         except Exception as e:
             rec.grading_status = "error"
@@ -447,11 +460,11 @@ def rerun_ocr_one(choice: str):
     try:
         rec.transcription = transcribe(
             rec.existing_image_paths(),
-            provider=s.ocr_provider, model=s.ocr_model, prompt=s.ocr_prompt,
-            gemini_api_key=s.gemini_api_key,
-            dashscope_api_key=s.dashscope_api_key,
-            dashscope_base_url=s.dashscope_base_url,
-            timeout_sec=s.ocr_timeout_sec, max_attempts=s.max_attempts,
+            provider=make_provider(s.ocr_provider, s),
+            model=s.ocr_model,
+            prompt=s.ocr_prompt,
+            timeout_sec=s.ocr_timeout_sec,
+            max_attempts=s.max_attempts,
             label=rec.folder_name,
         )
         rec.ocr_status = "done"
@@ -478,15 +491,15 @@ def rerun_grading_one(choice: str, edited_text: str):
     try:
         md = grade(
             transcription=rec.transcription,
-            student_id=rec.student_id, student_name=rec.student_name,
-            provider=s.grading_provider, model=s.grading_model,
+            student_id=rec.student_id,
+            student_name=rec.student_name,
+            provider=make_provider(s.grading_provider, s),
+            model=s.grading_model,
             prompt_template=s.grading_prompt,
             image_paths=rec.existing_image_paths(),
-            gemini_api_key=s.gemini_api_key,
-            anthropic_api_key=s.anthropic_api_key,
-            dashscope_api_key=s.dashscope_api_key,
-            dashscope_base_url=s.dashscope_base_url,
-            timeout_sec=s.grading_timeout_sec, max_attempts=s.max_attempts,
+            thinking=s.grading_thinking,
+            timeout_sec=s.grading_timeout_sec,
+            max_attempts=s.max_attempts,
         )
         rec.grading = md
         rec.score = extract_score(md)
@@ -608,18 +621,19 @@ def build_ui() -> gr.Blocks:
 
             gr.Markdown(
                 "### Provider & 模型（选 provider 后模型下拉会自动跟着切）\n"
-                "- **OCR**：默认 `qwen3-vl-plus`（百炼 Qwen3-VL 旗舰，日语手写实测稳）。"
-                "想跑最大号选 `qwen3-vl-235b-a22b-instruct`，省钱选 `qwen3-vl-flash`。\n"
-                "- **批改**：默认同 OCR；要更强推理选 `qwen3-vl-235b-a22b-thinking`，"
-                "或切到 `claude` / `gemini` provider。\n"
-                "- 模型框是「可输入下拉」：清单里没有的型号（如某个快照 ID）也可以直接粘贴。"
+                "- **OCR**：默认 `qwen3-vl-plus`（百炼 Qwen3-VL 旗舰，日语手写实测稳），"
+                "省钱选 `qwen3-vl-flash`。OCR 必须用视觉模型。\n"
+                "- **批改**：默认同 OCR，可对照原图二次复核；想省钱可以选 `qwen3.6-plus` "
+                "等纯文本模型，会自动跳过附图、只读 OCR 草稿。\n"
+                "- 模型框是「可输入下拉」：百炼上单独申请到的快照 / `qwen3-vl-235b-a22b-*` / "
+                "`qwen-vl-max-latest` 等都可以直接粘贴 ID。"
             )
             with gr.Row():
                 ocr_provider = gr.Dropdown(
                     OCR_PROVIDERS, value=s.ocr_provider, label="OCR 提供方",
                 )
                 ocr_model = gr.Dropdown(
-                    choices=models_for(s.ocr_provider),
+                    choices=models_for(s.ocr_provider, kind="ocr"),
                     value=s.ocr_model, label="OCR 模型",
                     allow_custom_value=True,
                 )
@@ -628,17 +642,25 @@ def build_ui() -> gr.Blocks:
                     label="批改提供方",
                 )
                 grading_model = gr.Dropdown(
-                    choices=models_for(s.grading_provider),
+                    choices=models_for(s.grading_provider, kind="grading"),
                     value=s.grading_model, label="批改模型",
                     allow_custom_value=True,
                 )
 
             ocr_provider.change(
-                _on_provider_change, inputs=ocr_provider, outputs=ocr_model,
+                _on_ocr_provider_change, inputs=ocr_provider, outputs=ocr_model,
             )
             grading_provider.change(
-                _on_provider_change, inputs=grading_provider, outputs=grading_model,
+                _on_grading_provider_change, inputs=grading_provider, outputs=grading_model,
             )
+
+            with gr.Row():
+                grading_thinking = gr.Checkbox(
+                    value=s.grading_thinking,
+                    label="批改时开启思考模式（仅 Qwen plus / flash 系列生效，同价免费拿推理）",
+                    info="对 235b-a22b-instruct/-thinking 等固定模式模型自动忽略；"
+                         "Gemini / Claude provider 暂不接入此开关。",
+                )
 
             gr.Markdown("### 性能（并发 / 超时 / 重试）")
             with gr.Row():
@@ -665,7 +687,7 @@ def build_ui() -> gr.Blocks:
                 save_settings,
                 inputs=[gemini_key, anthropic_key, dashscope_key, dashscope_base_url,
                         ocr_provider, ocr_model,
-                        grading_provider, grading_model,
+                        grading_provider, grading_model, grading_thinking,
                         ocr_prompt, grading_prompt,
                         ocr_concurrency, grading_concurrency,
                         ocr_timeout, grading_timeout, max_attempts],
