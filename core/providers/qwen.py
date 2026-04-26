@@ -115,24 +115,44 @@ class QwenProvider(Provider):
         if extra_body:
             kwargs["extra_body"] = extra_body
 
-        t0 = time.monotonic()
-        try:
-            resp = client.chat.completions.create(**kwargs)
-        except Exception as e:
+        # 整体重试：HTTP 错误已经在 OpenAI SDK 内部按 max_retries 退避过了，这里
+        # 加一层是为了应对 200 OK 但 message.content 为空的情况——qwen3-vl-plus
+        # 开 thinking 时偶发，DashScope 返回空 body，单请求里没有恢复路径。
+        max_attempts = max(1, int(max_attempts))
+        for attempt in range(1, max_attempts + 1):
+            t0 = time.monotonic()
+            try:
+                resp = client.chat.completions.create(**kwargs)
+            except Exception as e:
+                elapsed = time.monotonic() - t0
+                logger.error(f"[Qwen ✗] {tag} after {elapsed:.1f}s: {e}")
+                raise ProviderError(self._translate_error(e, model)) from e
+
             elapsed = time.monotonic() - t0
-            logger.error(f"[Qwen ✗] {tag} after {elapsed:.1f}s: {e}")
-            raise ProviderError(self._translate_error(e, model)) from e
+            text = ""
+            if resp.choices:
+                text = (resp.choices[0].message.content or "").strip()
+            if text:
+                logger.info(f"[Qwen ✓] {tag} {len(text)}字 in {elapsed:.1f}s ({n}图)")
+                return text
 
-        elapsed = time.monotonic() - t0
-        if not resp.choices:
-            raise ProviderError("Qwen 未返回任何 choice。")
-        text = (resp.choices[0].message.content or "").strip()
-        if not text:
-            logger.warning(f"[Qwen ⚠] {tag} 返回空文本 ({elapsed:.1f}s)")
-            raise ProviderError("Qwen 未返回文本。")
+            if attempt < max_attempts:
+                logger.warning(
+                    f"[Qwen ⚠] {tag} 返回空文本 ({elapsed:.1f}s)，"
+                    f"重试 {attempt + 1}/{max_attempts}"
+                )
+                continue
 
-        logger.info(f"[Qwen ✓] {tag} {len(text)}字 in {elapsed:.1f}s ({n}图)")
-        return text
+            logger.warning(
+                f"[Qwen ⚠] {tag} 返回空文本 ({elapsed:.1f}s)，已重试 {max_attempts} 次"
+            )
+            raise ProviderError(
+                "Qwen 多次返回空文本（thinking 模式偶发 bug）；"
+                "可在「设置」里关闭思考模式后重试，或调高最多重试次数。"
+            )
+
+        # 不会到这里——循环里要么 return 要么 raise——加个 raise 让 mypy 闭嘴。
+        raise ProviderError("Qwen 调用结束但未收到任何文本（不应到达此处）。")
 
     def _resolve_thinking(
         self, model: str, thinking: bool | None, label: str

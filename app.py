@@ -211,11 +211,10 @@ def run_ocr_batch(selected_keys, progress=gr.Progress(track_tqdm=False)):
         rec.save()
         return True
 
-    summary = _process_batch(
+    return _process_batch(
         targets, work_fn=work, label="OCR",
         workers=s.ocr_concurrency, progress=progress,
     )
-    return _task_html(), summary
 
 
 def run_grading_batch(selected_keys, progress=gr.Progress(track_tqdm=False)):
@@ -257,17 +256,16 @@ def run_grading_batch(selected_keys, progress=gr.Progress(track_tqdm=False)):
         rec.save()
         return True
 
-    summary = _process_batch(
+    return _process_batch(
         targets, work_fn=work, label="批改",
         workers=s.grading_concurrency, progress=progress,
     )
-    return _task_html(), summary
 
 
 def run_all(selected_keys, progress=gr.Progress(track_tqdm=False)):
-    _, log1 = run_ocr_batch(selected_keys, progress)
-    table, log2 = run_grading_batch(selected_keys, progress)
-    return table, f"{log1}  |  {log2}"
+    log1 = run_ocr_batch(selected_keys, progress)
+    log2 = run_grading_batch(selected_keys, progress)
+    return f"{log1}  |  {log2}"
 
 
 def reset_errors():
@@ -300,12 +298,24 @@ _TABLE_CSS = """
 }
 .task-table th { background: var(--background-fill-secondary, #f3f4f6); font-weight: 600; }
 .task-table tr:hover td { background: var(--background-fill-secondary, #f9fafb); }
-.task-badge { display:inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; }
-.st-pending { background:#e5e7eb; color:#374151; }
-.st-running { background:#fef3c7; color:#92400e; }
-.st-done    { background:#d1fae5; color:#065f46; }
-.st-error   { background:#fee2e2; color:#991b1b; }
-.task-err   { color:#b91c1c; cursor: help; max-width: 280px;
+/* 状态徽章：实色底 + 白字，亮 / 暗主题都能看清。
+   color 用 !important 是为了挡住 Gradio 把 --body-text-color 串到子节点上的情况。 */
+.task-badge {
+  display: inline-block; padding: 2px 10px; border-radius: 10px;
+  font-size: 12px; font-weight: 600; letter-spacing: .02em;
+  color: #fff !important; line-height: 1.4;
+}
+.st-pending { background:#64748b; }           /* slate-500 */
+.st-running { background:#d97706; }           /* amber-600 */
+.st-done    { background:#059669; }           /* emerald-600 */
+.st-error   { background:#dc2626; }           /* red-600 */
+/* running 加个轻微脉冲提示"在跑"，不抢镜 */
+.st-running { animation: task-pulse 1.6s ease-in-out infinite; }
+@keyframes task-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .65; }
+}
+.task-err   { color:#ef4444; cursor: help; max-width: 280px;
               white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
               display: inline-block; vertical-align: bottom; }
 .task-summary { margin: 4px 0 8px; font-size: 13px; color: var(--body-text-color); }
@@ -755,9 +765,17 @@ def build_ui() -> gr.Blocks:
                 scan, inputs=[folder],
                 outputs=[scan_table, scan_msg, task_html, task_select],
             )
-            ocr_btn.click(run_ocr_batch, inputs=[task_select], outputs=[task_html, run_log])
-            grade_btn.click(run_grading_batch, inputs=[task_select], outputs=[task_html, run_log])
-            all_btn.click(run_all, inputs=[task_select], outputs=[task_html, run_log])
+            # 批量按钮：进度条只挂在 run_log（小 Textbox）上，避免覆盖下面的大表格。
+            # 批次跑完用 .then() 显式刷一次任务总览，免得等 2 秒 timer。
+            ocr_btn.click(
+                run_ocr_batch, inputs=[task_select], outputs=run_log,
+            ).then(_task_html, outputs=task_html)
+            grade_btn.click(
+                run_grading_batch, inputs=[task_select], outputs=run_log,
+            ).then(_task_html, outputs=task_html)
+            all_btn.click(
+                run_all, inputs=[task_select], outputs=run_log,
+            ).then(_task_html, outputs=task_html)
             reset_btn2.click(reset_errors, outputs=[task_html, run_log])
 
             sel_all_btn.click(select_all_keys, outputs=task_select)
