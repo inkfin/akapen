@@ -43,8 +43,9 @@ class GeminiProvider(Provider):
     def chat(
         self,
         prompt: str,
-        image_paths: Sequence[Path],
+        image_paths: Sequence[Path] = (),
         *,
+        image_bytes: Sequence[bytes] = (),
         model: str,
         timeout_sec: int = 60,
         max_attempts: int = 2,
@@ -60,10 +61,15 @@ class GeminiProvider(Provider):
         except ImportError as e:
             raise ProviderError("google-genai 包未安装：pip install 'google-genai'") from e
 
-        paths = [Path(p) for p in image_paths]
-        for p in paths:
-            if not p.exists():
-                raise ProviderError(f"图片不存在：{p}")
+        jpeg_blobs: list[bytes] = []
+        if image_bytes:
+            jpeg_blobs = [bytes(b) for b in image_bytes]
+        elif image_paths:
+            paths = [Path(p) for p in image_paths]
+            for p in paths:
+                if not p.exists():
+                    raise ProviderError(f"图片不存在：{p}")
+            jpeg_blobs = [standardize_jpeg(p) for p in paths]
 
         client = genai.Client(
             api_key=self.api_key,
@@ -80,8 +86,7 @@ class GeminiProvider(Provider):
 
         parts: list = [genai_types.Part.from_text(text=prompt)]
         total_kb = 0
-        for p in paths:
-            data = standardize_jpeg(p)
+        for data in jpeg_blobs:
             total_kb += len(data) // 1024
             parts.append(genai_types.Part.from_bytes(data=data, mime_type="image/jpeg"))
 
@@ -100,7 +105,7 @@ class GeminiProvider(Provider):
                 f"忽略 thinking={thinking} 设置"
             )
 
-        n = len(paths)
+        n = len(jpeg_blobs)
         tag = label or model
         logger.info(
             f"[Gemini ▶] {tag} ({n}图, {total_kb}KB, model={model}, "

@@ -23,8 +23,18 @@ PROMPTS_DIR = ROOT / "prompts"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 
 DEFAULT_DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# 阿里云 ECS 同 region 部署时切到这个 endpoint，调 DashScope 不走公网带宽。
+# 设置入口：``Settings.use_vpc_endpoint=True``。
+DASHSCOPE_VPC_BASE_URL = "https://dashscope-vpc.aliyuncs.com/compatible-mode/v1"
 DEFAULT_QWEN_MODEL = "qwen3-vl-plus"
 DEFAULT_PROVIDER = "qwen"
+
+# 双档画质：OCR / single-shot 用高画质保识别率；两步模式下"批改时再发图"用低画质
+# 省带宽（批改不需要逐字看，只是对照原图复核）。
+OCR_MAX_LONG_SIDE = 1600
+OCR_JPEG_QUALITY = 85
+GRADING_MAX_LONG_SIDE = 1280
+GRADING_JPEG_QUALITY = 75
 
 # OCR 必须能「看图」，所以只放视觉 / 多模态 model。
 OCR_MODEL_CATALOG: dict[str, list[str]] = {
@@ -86,6 +96,10 @@ class Settings:
     anthropic_api_key: str = ""
     dashscope_api_key: str = ""
     dashscope_base_url: str = DEFAULT_DASHSCOPE_BASE_URL
+    # 切到阿里云内网 endpoint。仅当本服务部署在阿里云 ECS 且与 DashScope 同 region
+    # 时才有意义；跨 region 用了反而会失败。``effective_dashscope_base_url`` 会按这个
+    # 开关返回真正的 base_url。
+    use_vpc_endpoint: bool = False
     ocr_provider: str = DEFAULT_PROVIDER
     ocr_model: str = DEFAULT_QWEN_MODEL
     grading_provider: str = DEFAULT_PROVIDER
@@ -94,13 +108,28 @@ class Settings:
     # 235b-a22b-instruct/-thinking 等固定模式模型会被自动忽略；
     # gemini / claude provider 暂不接入此开关。
     grading_thinking: bool = False
+    # Single-shot 模式：一次 vision 调用同时返回 ``{transcription, grading}``，相比
+    # 两步模式（先 OCR 后批改）省一半带宽。后端默认走这条路径。
+    enable_single_shot: bool = True
+    # 两步模式下"批改阶段是否再发一次图"。``False`` = 纯 text 批改（只读 OCR 草稿，
+    # 0 图发出），最省带宽；``True`` = 再发一次图给批改模型对照原稿复核，质量更高
+    # 但带宽 ×2。仅在 ``enable_single_shot=False`` 时才用得上。
+    grading_with_image: bool = False
     ocr_prompt: str = ""
     grading_prompt: str = ""
+    single_shot_prompt: str = ""
     ocr_concurrency: int = 8
     grading_concurrency: int = 6
     ocr_timeout_sec: int = 60
     grading_timeout_sec: int = 120
     max_attempts: int = 2
+
+    @property
+    def effective_dashscope_base_url(self) -> str:
+        """根据 ``use_vpc_endpoint`` 开关挑公网 / 内网 endpoint。"""
+        if self.use_vpc_endpoint:
+            return DASHSCOPE_VPC_BASE_URL
+        return self.dashscope_base_url or DEFAULT_DASHSCOPE_BASE_URL
 
     @classmethod
     def load(cls) -> "Settings":
@@ -110,8 +139,10 @@ class Settings:
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             dashscope_api_key=os.getenv("DASHSCOPE_API_KEY", ""),
             dashscope_base_url=os.getenv("DASHSCOPE_BASE_URL", DEFAULT_DASHSCOPE_BASE_URL),
-            ocr_prompt=(PROMPTS_DIR / "ocr.md").read_text(encoding="utf-8"),
-            grading_prompt=(PROMPTS_DIR / "grading.md").read_text(encoding="utf-8"),
+            use_vpc_endpoint=os.getenv("USE_VPC_ENDPOINT", "").lower() in ("1", "true", "yes"),
+            ocr_prompt=_read_prompt("ocr.md"),
+            grading_prompt=_read_prompt("grading.md"),
+            single_shot_prompt=_read_prompt("single_shot.md"),
         )
         if SETTINGS_FILE.exists():
             try:
@@ -134,3 +165,11 @@ class Settings:
             json.dumps(asdict(self), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+
+def _read_prompt(name: str) -> str:
+    """读 prompts/<name>，文件缺失时返回空串（部分场景如 single-shot 关闭时不需要）。"""
+    path = PROMPTS_DIR / name
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")

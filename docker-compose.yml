@@ -1,0 +1,52 @@
+# 一键部署批改任务中台（FastAPI + asyncio worker + SQLite）。
+# 用法：
+#   1) cp .env.example .env  # 然后填 DASHSCOPE_API_KEY / API_KEYS / WEBHOOK_SECRET 等
+#   2) mkdir -p data && (Linux 上若宿主 uid != 1000：sudo chown -R 1000:1000 data)
+#   3) docker compose up -d --build
+#   4) curl http://127.0.0.1:8000/v1/livez   # 应返回 200
+
+services:
+  backend:
+    build:
+      context: .
+      # 想跟宿主 uid 对齐，可以 export USER_UID=$(id -u) USER_GID=$(id -g) 再 build
+      args:
+        USER_UID: ${USER_UID:-1000}
+        USER_GID: ${USER_GID:-1000}
+    image: akapen-backend:latest
+    container_name: akapen-backend
+    restart: unless-stopped
+    # tini 转发 SIGTERM，让 FastAPI lifespan 能干净收尾（worker 把队列里的任务标 cancelled）
+    init: true
+    # 容器内永远监听 8000；改 host 端口请只动左边。BACKEND_PORT 在 .env 中保留默认 8000。
+    ports:
+      - "${HOST_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      # 容器内强制走 0.0.0.0 / 8000，覆盖 .env 里可能设的 BACKEND_HOST/BACKEND_PORT
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_PORT: "8000"
+    volumes:
+      # SQLite (grading.db) + uploads/ + logs/ + records/ 全部挂回宿主机
+      - ./data:/app/data
+      # 想热更 prompts 而不重新打镜像，把下面这行解开就行（容器内文件随宿主同步）
+      # - ./prompts:/app/prompts:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; r = urllib.request.urlopen('http://127.0.0.1:8000/v1/livez', timeout=3); sys.exit(0 if r.status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    # 2C2G 服务器留点 buffer：容器最多吃 1.5G 内存，避免 OOM 影响系统进程
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

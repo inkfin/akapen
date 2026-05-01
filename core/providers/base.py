@@ -57,8 +57,9 @@ class Provider(ABC):
     def chat(
         self,
         prompt: str,
-        image_paths: Sequence[Path],
+        image_paths: Sequence[Path] = (),
         *,
+        image_bytes: Sequence[bytes] = (),
         model: str,
         timeout_sec: int = 60,
         max_attempts: int = 2,
@@ -67,6 +68,17 @@ class Provider(ABC):
         label: str = "",
     ) -> str:
         """单轮 chat：``prompt`` + （可选）多张图，返回非空文本。
+
+        图片可以从两个来源传入，**二选一**：
+
+        - ``image_paths``：磁盘上的文件，provider 会调 :func:`core.imageproc.standardize_jpeg`
+          做 EXIF 旋正 + 长边缩放 + JPEG 重编码（默认 1600/85）。Gradio 单文件路径用这条。
+        - ``image_bytes``：调用方已经标准化好的 JPEG 字节。后端 fetcher 从 URL 拉图后
+          一次性 standardize 成 bytes 缓存在 worker 内存里，可以重用同一份 bytes 给
+          OCR / 批改 / single-shot 多次调用，避免重复解码 + 重编码。
+          **provider 收到 bytes 后不会再做任何处理，直接 base64 / multipart 发出去。**
+
+        两个参数同时传非空时以 ``image_bytes`` 优先；都为空就是纯文本调用。
 
         失败时抛 :class:`ProviderError`。
         """

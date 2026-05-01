@@ -1,0 +1,36 @@
+[project]
+name = "akapen"
+version = "0.2.0"
+description = "日语作文批改 —— 离线 Gradio Demo（demo/）+ 批改任务中台（backend/）共享业务核心 core/"
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+license = { text = "MIT" }
+authors = [{ name = "akapen contributors" }]
+
+# 业务依赖。Docker 构建会从 uv 导出的 requirements.txt 直接 pip install，
+# 所以这里是唯一的 single source of truth。
+dependencies = [
+    # LLM SDK / 接入层
+    "google-genai>=1.0",
+    "anthropic>=0.39",
+    "openai>=1.50,<2",
+    # 业务工具
+    "python-dotenv>=1.0",
+    "pillow>=10.0",
+    "pydantic>=2.7",
+    # 模式 A · 离线 Gradio
+    "gradio>=6.0,<7",
+    # 模式 B · 批改任务中台
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "aiosqlite>=0.20",
+    "httpx>=0.27",
+    "slowapi>=0.1.9",
+    "prometheus-client>=0.21",
+    "python-multipart>=0.0.12",
+]
+
+[tool.uv]
+# 这是个 application repo（不发 wheel），uv 只负责锁依赖 + 起 venv，
+# 不要尝试把当前目录当 package 安装。业务代码靠 PYTHONPATH=. 直接 import。
+package = false

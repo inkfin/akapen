@@ -42,8 +42,9 @@ class ClaudeProvider(Provider):
     def chat(
         self,
         prompt: str,
-        image_paths: Sequence[Path],
+        image_paths: Sequence[Path] = (),
         *,
+        image_bytes: Sequence[bytes] = (),
         model: str,
         timeout_sec: int = 60,
         max_attempts: int = 2,
@@ -58,15 +59,19 @@ class ClaudeProvider(Provider):
         except ImportError as e:
             raise ProviderError("anthropic 包未安装：pip install 'anthropic'") from e
 
-        paths = [Path(p) for p in image_paths]
-        for p in paths:
-            if not p.exists():
-                raise ProviderError(f"图片不存在：{p}")
+        jpeg_blobs: list[bytes] = []
+        if image_bytes:
+            jpeg_blobs = [bytes(b) for b in image_bytes]
+        elif image_paths:
+            paths = [Path(p) for p in image_paths]
+            for p in paths:
+                if not p.exists():
+                    raise ProviderError(f"图片不存在：{p}")
+            jpeg_blobs = [standardize_jpeg(p) for p in paths]
 
         content: list[dict] = []
         total_kb = 0
-        for p in paths:
-            data = standardize_jpeg(p)
+        for data in jpeg_blobs:
             total_kb += len(data) // 1024
             data_b64 = base64.standard_b64encode(data).decode("ascii")
             content.append({
@@ -79,7 +84,7 @@ class ClaudeProvider(Provider):
             })
         content.append({"type": "text", "text": prompt})
 
-        n = len(paths)
+        n = len(jpeg_blobs)
         tag = label or model
         if thinking is not None:
             logger.info(

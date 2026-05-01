@@ -9,7 +9,7 @@
         └── 1.jpg
 
 启动：
-    python app.py
+    uv run python -m demo.app
 浏览器打开 http://127.0.0.1:7860
 """
 from __future__ import annotations
@@ -28,12 +28,13 @@ from core.config import (
     Settings,
     models_for,
 )
-from core.filenames import scan_folder
 from core.grader import GradingError, grade
 from core.logger import LOG_FILE, clear_log, setup_logging, tail_log
 from core.ocr import OCRError, transcribe
 from core.providers import make_provider
-from core.storage import StudentRecord, extract_score, make_key
+
+from .filenames import scan_folder
+from .storage import StudentRecord, extract_score, make_key
 
 logger = setup_logging()
 

@@ -29,8 +29,9 @@ class OCRError(RuntimeError):
 
 
 def transcribe(
-    image_paths: list[str | Path],
+    image_paths: list[str | Path] | None = None,
     *,
+    image_bytes: list[bytes] | None = None,
     provider: Provider,
     model: str,
     prompt: str,
@@ -38,20 +39,34 @@ def transcribe(
     max_attempts: int = 2,
     label: str = "",
 ) -> str:
-    """把一位学生的多张作文图片合并送多模态模型一次，按页码顺序生成完整转写。"""
+    """把一位学生的多张作文图片合并送多模态模型一次，按页码顺序生成完整转写。
+
+    图片来源二选一（与 :meth:`Provider.chat` 一致）：
+
+    - ``image_paths``：磁盘上的文件，provider 会按需调 :func:`standardize_jpeg`；
+    - ``image_bytes``：调用方已经标准化好的 JPEG 字节（后端 fetcher 走这条）。
+
+    都为空 → :class:`OCRError`。
+    """
     if not prompt.strip():
         raise OCRError("OCR prompt 为空。")
-    if not image_paths:
-        raise OCRError("没有图片可转写。")
 
-    paths = [Path(p) for p in image_paths]
-    for p in paths:
-        if not p.exists():
-            raise OCRError(f"图片不存在：{p}")
+    if image_bytes:
+        n = len(image_bytes)
+        paths_to_send: list[Path] = []
+        bytes_to_send: list[bytes] = list(image_bytes)
+    elif image_paths:
+        paths_to_send = [Path(p) for p in image_paths]
+        for p in paths_to_send:
+            if not p.exists():
+                raise OCRError(f"图片不存在：{p}")
+        n = len(paths_to_send)
+        bytes_to_send = []
+    else:
+        raise OCRError("没有图片可转写（image_paths 与 image_bytes 都为空）。")
 
-    n = len(paths)
     if not label:
-        label = paths[0].parent.name
+        label = paths_to_send[0].parent.name if paths_to_send else "<bytes>"
     full_prompt = _build_prompt(prompt, n)
 
     logger.info(
@@ -61,7 +76,8 @@ def transcribe(
     try:
         text = provider.chat(
             full_prompt,
-            paths,
+            paths_to_send,
+            image_bytes=bytes_to_send,
             model=model,
             timeout_sec=timeout_sec,
             max_attempts=max_attempts,

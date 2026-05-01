@@ -38,7 +38,7 @@ class QwenProvider(Provider):
     def from_settings(cls, settings: "Settings") -> "QwenProvider":
         return cls(
             api_key=settings.dashscope_api_key,
-            base_url=settings.dashscope_base_url,
+            base_url=settings.effective_dashscope_base_url,
         )
 
     def is_vision_model(self, model: str) -> bool:
@@ -58,8 +58,9 @@ class QwenProvider(Provider):
     def chat(
         self,
         prompt: str,
-        image_paths: Sequence[Path],
+        image_paths: Sequence[Path] = (),
         *,
+        image_bytes: Sequence[bytes] = (),
         model: str,
         timeout_sec: int = 60,
         max_attempts: int = 2,
@@ -74,10 +75,16 @@ class QwenProvider(Provider):
         except ImportError as e:
             raise ProviderError("openai 包未安装：pip install 'openai>=1.50'") from e
 
-        paths = [Path(p) for p in image_paths]
-        for p in paths:
-            if not p.exists():
-                raise ProviderError(f"图片不存在：{p}")
+        # 图片来源：image_bytes 优先（已标准化），否则 image_paths（按需标准化）。
+        jpeg_blobs: list[bytes] = []
+        if image_bytes:
+            jpeg_blobs = [bytes(b) for b in image_bytes]
+        elif image_paths:
+            paths = [Path(p) for p in image_paths]
+            for p in paths:
+                if not p.exists():
+                    raise ProviderError(f"图片不存在：{p}")
+            jpeg_blobs = [standardize_jpeg(p) for p in paths]
 
         client = OpenAI(
             api_key=self.api_key,
@@ -88,8 +95,7 @@ class QwenProvider(Provider):
 
         content: list[dict] = []
         total_kb = 0
-        for p in paths:
-            data = standardize_jpeg(p)
+        for data in jpeg_blobs:
             total_kb += len(data) // 1024
             b64 = base64.b64encode(data).decode("ascii")
             content.append({
@@ -100,7 +106,7 @@ class QwenProvider(Provider):
 
         extra_body, think_label = self._resolve_thinking(model, thinking, label)
 
-        n = len(paths)
+        n = len(jpeg_blobs)
         tag = label or model
         logger.info(
             f"[Qwen ▶] {tag} ({n}图, {total_kb}KB, model={model}, "

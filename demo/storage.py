@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from .config import DATA_DIR
+from core.config import DATA_DIR
 
 RECORDS_DIR = DATA_DIR / "records"
 

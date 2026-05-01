@@ -1,7 +1,15 @@
 """图片预处理：标准化方向、按长边缩放、再编 JPEG，保证清晰度的同时尽量减小体积。
 
 用法：
-    >>> data = standardize_jpeg(Path("foo.jpg"))   # bytes，可直接喂给 Gemini Part.from_bytes
+
+    # 从磁盘文件标准化（Gradio / 一次性脚本）
+    data = standardize_jpeg(Path("foo.jpg"))
+
+    # 从内存字节标准化（backend fetcher 拉到的远程图片）
+    data = standardize_jpeg_bytes(downloaded_bytes)
+
+`max_long_side` / `quality` 默认是 OCR 档（1600/85）。批改如果想压更多带宽可以传
+``GRADING_MAX_LONG_SIDE`` / ``GRADING_JPEG_QUALITY``（见 :mod:`core.config`）。
 """
 from __future__ import annotations
 
@@ -26,31 +34,53 @@ def standardize_jpeg(
     """读图片 → EXIF 旋转 → 长边缩放 → 编码 JPEG，返回字节。"""
     path = Path(path)
     with Image.open(path) as img:
-        img = ImageOps.exif_transpose(img)
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-        elif img.mode == "L":
-            img = img.convert("RGB")
+        return _standardize_pil(
+            img, max_long_side=max_long_side, quality=quality, label=path.name,
+            orig_size=path.stat().st_size,
+        )
 
-        w, h = img.size
-        long_side = max(w, h)
-        if long_side > max_long_side:
-            scale = max_long_side / long_side
-            new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
-            img = img.resize(new_size, Image.LANCZOS)
-            scaled = True
-        else:
-            scaled = False
 
-        buf = BytesIO()
-        img.save(buf, format="JPEG", quality=quality, optimize=True, progressive=True)
-        data = buf.getvalue()
+def standardize_jpeg_bytes(
+    data: bytes,
+    *,
+    max_long_side: int = DEFAULT_MAX_LONG_SIDE,
+    quality: int = DEFAULT_QUALITY,
+    label: str = "<bytes>",
+) -> bytes:
+    """从内存字节做同样的标准化。后端从 URL 拉下来的图直接走这条路径，不落临时文件。"""
+    with Image.open(BytesIO(data)) as img:
+        return _standardize_pil(
+            img, max_long_side=max_long_side, quality=quality, label=label,
+            orig_size=len(data),
+        )
 
-    orig_size = path.stat().st_size
+
+def _standardize_pil(
+    img: Image.Image, *, max_long_side: int, quality: int,
+    label: str, orig_size: int,
+) -> bytes:
+    img = ImageOps.exif_transpose(img)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+
+    w, h = img.size
+    long_side = max(w, h)
+    if long_side > max_long_side:
+        scale = max_long_side / long_side
+        new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+        img = img.resize(new_size, Image.LANCZOS)
+        scaled = True
+    else:
+        scaled = False
+
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=quality, optimize=True, progressive=True)
+    data = buf.getvalue()
+
     logger.debug(
-        "%s %dx%d→%dx%d %s %d→%dKB",
-        path.name, w, h, *img.size,
+        "%s %dx%d→%dx%d %s %d→%dKB (q=%d, max=%d)",
+        label, w, h, *img.size,
         "(scaled)" if scaled else "(no-resize)",
-        orig_size // 1024, len(data) // 1024,
+        orig_size // 1024, len(data) // 1024, quality, max_long_side,
     )
     return data
