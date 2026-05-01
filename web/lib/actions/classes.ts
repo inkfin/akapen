@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { optionalText } from "@/lib/zod-helpers";
 
 async function requireUserId() {
   const session = await auth();
@@ -15,7 +16,7 @@ async function requireUserId() {
 
 const classCreate = z.object({
   name: z.string().min(1).max(64),
-  school: z.string().max(128).optional().or(z.literal("")),
+  school: optionalText(128),
 });
 
 export async function createClassAction(
@@ -32,7 +33,7 @@ export async function createClassAction(
   await prisma.class.create({
     data: {
       name: parsed.data.name.trim(),
-      school: parsed.data.school?.trim() || null,
+      school: parsed.data.school.trim() || null,
       ownerId: userId,
     },
   });

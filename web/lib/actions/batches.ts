@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { optionalText } from "@/lib/zod-helpers";
 
 async function requireUserId() {
   const session = await auth();
@@ -16,7 +17,7 @@ async function requireUserId() {
 const batchCreate = z.object({
   classId: z.string().min(1),
   title: z.string().min(1).max(128),
-  notes: z.string().max(2000).optional().or(z.literal("")),
+  notes: optionalText(2000),
 });
 
 export async function createBatchAction(
@@ -36,7 +37,7 @@ export async function createBatchAction(
       classId: parsed.data.classId,
       ownerId: userId,
       title: parsed.data.title.trim(),
-      notes: parsed.data.notes?.trim() || null,
+      notes: parsed.data.notes.trim() || null,
     },
   });
   revalidatePath("/batches");
@@ -57,6 +58,8 @@ export async function deleteBatchAction(formData: FormData) {
 //
 // customGradingPrompt / customSingleShotPrompt 是高级口子：填了就**整段覆盖**
 // 全局 prompt（不再走 {rubric} 替换），适合题型与全局模板差异大的场景。
+// 它们是条件渲染的（藏在「高级」折叠里），所以必须用 optionalText —— 老师没
+// 展开时这俩 key 在 FormData 里就根本不存在，naive schema 会爆 "Invalid input"。
 const questionCreate = z.object({
   batchId: z.string().min(1),
   index: z.coerce.number().int().min(1).max(99),
@@ -66,16 +69,8 @@ const questionCreate = z.object({
     .trim()
     .min(4, "评分细则太短：至少写出本题满分和给分点")
     .max(4000),
-  customGradingPrompt: z
-    .string()
-    .max(16000)
-    .optional()
-    .or(z.literal("")),
-  customSingleShotPrompt: z
-    .string()
-    .max(16000)
-    .optional()
-    .or(z.literal("")),
+  customGradingPrompt: optionalText(16000),
+  customSingleShotPrompt: optionalText(16000),
 });
 
 export async function upsertQuestionAction(
@@ -98,8 +93,8 @@ export async function upsertQuestionAction(
   const data = {
     prompt: parsed.data.prompt.trim(),
     rubric: parsed.data.rubric.trim(),
-    customGradingPrompt: parsed.data.customGradingPrompt?.trim() || null,
-    customSingleShotPrompt: parsed.data.customSingleShotPrompt?.trim() || null,
+    customGradingPrompt: parsed.data.customGradingPrompt.trim() || null,
+    customSingleShotPrompt: parsed.data.customSingleShotPrompt.trim() || null,
   };
 
   await prisma.question.upsert({
