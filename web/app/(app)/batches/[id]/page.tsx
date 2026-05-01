@@ -83,13 +83,14 @@ export default async function BatchDetailPage({
               <TableRow>
                 <TableHead className="w-16">题号</TableHead>
                 <TableHead>题干</TableHead>
-                <TableHead className="w-72">评分要求</TableHead>
+                <TableHead className="w-64">给分细则</TableHead>
+                <TableHead className="w-56">修改意见</TableHead>
                 <TableHead className="w-24 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {batch.questions.length === 0 ? (
-                <TableEmpty colSpan={4} message="还没有题目 —— 点右上角「添加题目」" />
+                <TableEmpty colSpan={5} message="还没有题目 —— 点右上角「添加题目」" />
               ) : (
                 batch.questions.map((q) => {
                   const hasCustomPrompt =
@@ -107,7 +108,7 @@ export default async function BatchDetailPage({
                           </p>
                         ) : (
                           <p className="text-xs text-sky-600 dark:text-sky-400">
-                            💬 只批注（不打分）
+                            💬 不打分
                           </p>
                         )}
                         {hasCustomPrompt ? (
@@ -115,6 +116,17 @@ export default async function BatchDetailPage({
                             ⚙ 已覆盖全局 prompt
                           </p>
                         ) : null}
+                      </TableCell>
+                      <TableCell className="max-w-xs">
+                        {q.feedbackGuide && q.feedbackGuide.trim() ? (
+                          <p className="line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
+                            {q.feedbackGuide}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-muted-foreground/70">
+                            （默认指南）
+                          </p>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
@@ -126,6 +138,7 @@ export default async function BatchDetailPage({
                               index: q.index,
                               prompt: q.prompt,
                               rubric: q.rubric,
+                              feedbackGuide: q.feedbackGuide,
                               customGradingPrompt: q.customGradingPrompt,
                               customSingleShotPrompt: q.customSingleShotPrompt,
                             }}

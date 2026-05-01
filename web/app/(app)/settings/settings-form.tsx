@@ -17,6 +17,7 @@ import {
   testAkapenConnectionAction,
 } from "@/lib/actions/settings";
 import {
+  DEFAULT_FEEDBACK_GUIDE,
   DEFAULT_PROMPT_GRADING,
   DEFAULT_PROMPT_OCR,
   DEFAULT_PROMPT_SINGLE_SHOT,
@@ -186,6 +187,41 @@ export function SettingsForm({ initial }: { initial: WebSettingsView }) {
 
           </CardContent>
         ) : null}
+      </Card>
+
+      {/* ────── 通用「修改意见」默认模板 ────── */}
+      {/*
+        三层回落：题目级 Question.feedbackGuide > 这里（老师全局） >
+        model-catalog.ts 硬编码的 DEFAULT_FEEDBACK_GUIDE。
+        想覆盖单道题，去那道题的"修改意见"栏；想改"我所有题目都按这个语气批"，
+        就改这里 —— 比如全班都是英语作文 / 全班都是数学，希望模型分别走不同的反馈风格。
+      */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            通用「修改意见」默认模板{" "}
+            <span className="text-xs font-normal text-muted-foreground">
+              · 题目未单独设置时套用
+            </span>
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            告诉模型<strong>怎么给学生写反馈</strong>：关注哪些方面、用什么语气、要不要先肯定优点。
+            <br />
+            题目里单独填了「修改意见」 → 用题目那一份；题目没填 → 用这份；这份也留空 → 用系统硬编码的通用模板。
+          </p>
+        </CardHeader>
+        <CardContent>
+          <PromptField
+            label="默认修改意见模板"
+            value={s.defaultFeedbackGuide}
+            onChange={(v) => update("defaultFeedbackGuide", v)}
+            rows={6}
+            onReset={() => {
+              update("defaultFeedbackGuide", DEFAULT_FEEDBACK_GUIDE);
+              toast.success("已重置为推荐模板");
+            }}
+          />
+        </CardContent>
       </Card>
 
       {/* ────── 全局批改提示词模板（页面最下，次要） ────── */}

@@ -17,12 +17,15 @@ import { getWebSettings, type WebSettingsView } from "@/lib/actions/settings";
 import { isNoGradingQuestion, substituteRubric } from "@/lib/model-catalog";
 
 /**
- * 把用户的 WebSettings + 单道题目的 rubric / customPrompt 拼成 ProviderOverrides。
+ * 把用户的 WebSettings + 单道题目的 rubric / feedbackGuide / customPrompt
+ * 拼成 ProviderOverrides。
  *
  * 三层 prompt 决策（优先级从高到低）：
- *   1. question.customSingleShotPrompt / customGradingPrompt → 整段覆盖，不再注入 rubric
+ *   1. question.customSingleShotPrompt / customGradingPrompt → 整段覆盖，
+ *      不再注入 rubric / feedbackGuide
  *   2. WebSettings.singleShotPrompt / gradingPrompt （含 {rubric} 占位符）→
- *      用 question.rubric 替换占位符；rubric 为空时切到"只批注 / 不打分"指令
+ *      用 question.rubric + feedbackGuide 替换占位符；rubric 为空时切到
+ *      "只批注 / 不打分"指令；feedbackGuide 为空时用通用默认指南
  *   3. 都为空 → 不传 prompt 字段，backend 用自己 backend/prompts/*.md 默认
  *      （不推荐：backend 默认 prompt 没有 rubric 概念，所有题目按一刀切的
  *      100 分作文打分）
@@ -32,20 +35,33 @@ import { isNoGradingQuestion, substituteRubric } from "@/lib/model-catalog";
  */
 function buildProviderOverridesForQuestion(
   s: WebSettingsView,
-  question: { rubric: string | null; customGradingPrompt: string | null; customSingleShotPrompt: string | null },
+  question: {
+    rubric: string | null;
+    feedbackGuide: string | null;
+    customGradingPrompt: string | null;
+    customSingleShotPrompt: string | null;
+  },
 ): AkapenCreateTaskInput["providerOverrides"] {
+  // 三层回落决定 effective feedback guide：
+  // 题目级 > 老师全局（settings.defaultFeedbackGuide） > model-catalog 硬编码
+  // （substituteRubric 内部把 null/空 串切到硬编码 DEFAULT_FEEDBACK_GUIDE）
+  const effectiveFeedbackGuide =
+    (question.feedbackGuide && question.feedbackGuide.trim()) ||
+    (s.defaultFeedbackGuide && s.defaultFeedbackGuide.trim()) ||
+    null;
+
   // single-shot prompt：custom > settings.singleShotPrompt 替换 rubric > 不传
   const singleShotPrompt = question.customSingleShotPrompt
     ? question.customSingleShotPrompt
     : s.singleShotPrompt
-      ? substituteRubric(s.singleShotPrompt, question.rubric)
+      ? substituteRubric(s.singleShotPrompt, question.rubric, effectiveFeedbackGuide)
       : undefined;
 
   // grading prompt：custom > settings.gradingPrompt 替换 rubric > 不传
   const gradingPrompt = question.customGradingPrompt
     ? question.customGradingPrompt
     : s.gradingPrompt
-      ? substituteRubric(s.gradingPrompt, question.rubric)
+      ? substituteRubric(s.gradingPrompt, question.rubric, effectiveFeedbackGuide)
       : undefined;
 
   return {
@@ -156,13 +172,19 @@ export async function gradeSubmissionsAction(
         sub.question,
       );
 
-      // 拼 question_context：题干（+ 评分细则，如果有）
-      // 注意：rubric 已经塞进 prompt 模板了，question_context 这里再带一份是
-      // 给 backend 在 prompt 顶部额外提示用的，让模型对题目背景多一份认知。
-      // "只批注"模式（rubric 为空）下不重复带评分细则段，避免 prompt 自相矛盾。
-      const ctx = isNoGradingQuestion(sub.question.rubric)
-        ? sub.question.prompt
-        : `${sub.question.prompt}\n\n本题评分细则：\n${sub.question.rubric}`;
+      // 拼 question_context：题干（+ 给分细则 / 修改意见指引，如果填了）
+      // 注意：rubric / feedbackGuide 已经塞进 prompt 模板了，question_context 这里
+      // 再带一份是给 backend 在 prompt 顶部额外提示用的，让模型对题目背景多一份认知。
+      // "只批注"模式（rubric 为空）下不重复带"给分细则"段，避免 prompt 自相矛盾；
+      // feedbackGuide 留空时也省略，让模型自己用默认 feedback 方向。
+      const ctxParts: string[] = [sub.question.prompt];
+      if (!isNoGradingQuestion(sub.question.rubric)) {
+        ctxParts.push(`本题给分细则：\n${sub.question.rubric}`);
+      }
+      if (sub.question.feedbackGuide && sub.question.feedbackGuide.trim()) {
+        ctxParts.push(`修改意见方向：\n${sub.question.feedbackGuide.trim()}`);
+      }
+      const ctx = ctxParts.join("\n\n");
 
       const akapenRes = await createGradingTask({
         studentId: sub.student.externalId,

@@ -81,13 +81,21 @@ model Question {
   index   Int // 第几题，UI 排序 + 学生上传时选择
   prompt  String // 题干，会作为 question_context 送 akapen
 
-  /// 本题的评分细则：满分多少、给分点、扣分项。
-  /// **留空** = "只批注"模式：LLM 只读题干 + 学生答题 → 只输出修改建议（feedback），
-  /// 不打分。适合开放作文 / 写作辅导这类没有标准答案的题。
+  /// 本题的**给分细则**：满分多少、给分点、扣分项。
+  /// **留空** = "只批注 / 不打分"：LLM 只输出 transcription + feedback，
+  /// 不输出 final_score / max_score / dimension_scores。适合开放作文等无标准答案的题。
   /// **非空** = 正常打分：全局 grading prompt 模板里的 `{rubric}` 占位符
   /// 会被替换成这段文字；满分由 LLM 根据 rubric 字面识别（"本题满分 30 分"），
   /// 实际用的 max 回填到 GradingTask.maxScore。
   rubric String?
+
+  /// 本题的**修改意见指南**：希望模型给学生写哪类反馈、关注哪些方面、用什么语气。
+  /// 与 `rubric` 相互独立 —— rubric 控"打不打分 / 怎么打分"，feedbackGuide
+  /// 控"怎么写 feedback"。
+  /// **留空** = 用通用默认指南（关注内容 / 结构 / 语言 / 语法的常规修改建议）。
+  /// **非空** = 用这段指引；可以写"用鼓励性语气"、"重点指出语法错误"、
+  /// "按段落给意见"等具体要求。
+  feedbackGuide String?
 
   /// 高级：单题自定义"批改 prompt（两步模式）"。
   /// 留 NULL = 用 WebSettings 的全局 gradingPrompt（替换 {rubric} 后送 LLM）；
@@ -152,6 +160,11 @@ model WebSettings {
   ocrPrompt        String?
   gradingPrompt    String?
   singleShotPrompt String?
+
+  /// 全局默认「修改意见 / feedback 指南」。三层回落：
+  /// Question.feedbackGuide（题目级） > 这个（老师全局） > model-catalog.ts:DEFAULT_FEEDBACK_GUIDE（硬编码兜底）
+  /// 留 NULL = 用硬编码默认（覆盖内容 / 结构 / 语言 / 语法的常规修改建议）。
+  defaultFeedbackGuide String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -53,9 +53,10 @@ export async function deleteBatchAction(formData: FormData) {
   redirect("/batches");
 }
 
-// 题目层评分细则。
-// - 填了 = 正常打分模式：全局 prompt 里的 {rubric} 占位符替换成这段。
-// - 留空 = "只批注"模式：模型只输出修改建议，不打分；UI 不显示分数列。
+// 题目层批改要求 —— 拆成两路独立 optional 字段：
+// - rubric（给分细则）：填了 = 按这段打分；留空 = "只批注"模式不打分。
+// - feedbackGuide（修改意见指南）：填了 = 按指引写 feedback；留空 = 用通用默认指南。
+// 二者完全独立，可以"打分但用默认 feedback"，也可以"不打分但 feedback 有自定义指引"。
 //
 // customGradingPrompt / customSingleShotPrompt 是高级口子：填了就**整段覆盖**
 // 全局 prompt（不再走 {rubric} 替换），适合题型与全局模板差异大的场景。
@@ -66,6 +67,7 @@ const questionCreate = z.object({
   index: z.coerce.number().int().min(1).max(99),
   prompt: z.string().min(1).max(4000),
   rubric: optionalText(4000),
+  feedbackGuide: optionalText(4000),
   customGradingPrompt: optionalText(16000),
   customSingleShotPrompt: optionalText(16000),
 });
@@ -80,6 +82,7 @@ export async function upsertQuestionAction(
     index: formData.get("index"),
     prompt: formData.get("prompt"),
     rubric: formData.get("rubric"),
+    feedbackGuide: formData.get("feedbackGuide"),
     customGradingPrompt: formData.get("customGradingPrompt"),
     customSingleShotPrompt: formData.get("customSingleShotPrompt"),
   });
@@ -90,6 +93,7 @@ export async function upsertQuestionAction(
   const data = {
     prompt: parsed.data.prompt.trim(),
     rubric: parsed.data.rubric.trim() || null,
+    feedbackGuide: parsed.data.feedbackGuide.trim() || null,
     customGradingPrompt: parsed.data.customGradingPrompt.trim() || null,
     customSingleShotPrompt: parsed.data.customSingleShotPrompt.trim() || null,
   };

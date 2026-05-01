@@ -395,41 +395,69 @@ ${RUBRIC_PLACEHOLDER}
 
 /**
  * 当 question.rubric 为空（老师选择"只批注 / 不打分"模式）时，把模板里的
- * {rubric} 占位符替换成这段强指令，让模型：
+ * {rubric} 占位符前半段切成这段强指令，让模型：
  * - 只输出 transcription + grading.feedback（修改建议）
  * - **不要**输出 final_score / max_score / dimension_scores
  *
  * 配合 `core/schemas.py`（这几个字段已经是 `float | None = None` / 默认空列表），
  * 模型完全省略它们也能 parse 通过；UI 拿到 finalScore=null 就走"已批注"分支。
  */
-const NO_GRADING_RUBRIC_BLOCK = `**本题不打分**：本题没有标准答案 / 评分细则，老师只想让你给学生**修改建议**。
+const NO_GRADING_BLOCK = `## 评分模式
 
-请按下面方式输出 JSON：
-- 必填字段：\`transcription\`（完整转写）、\`grading.feedback\`（详尽的中文修改建议，可分点列出语法 / 用词 / 结构 / 论据等问题）
+**本题不打分**：本题没有标准答案 / 评分细则。
+
+- 必填字段：\`transcription\`（完整转写）、\`grading.feedback\`（详尽的中文修改建议）
 - **禁止输出**：\`grading.final_score\` / \`grading.max_score\` / \`grading.dimension_scores\`（这三项整段省略，**不要**写成 0、null 或空数组）
 - \`grading.confidence\` 仍按惯例自评 0~1
-- \`grading.review_flag\` 一般留 false；除非作答几乎完全无法识别 / 跑题严重
-
-feedback 是这次批改的**唯一交付物**，请写得具体、可操作，引用学生原文片段说明问题。`;
+- \`grading.review_flag\` 一般留 false；除非作答几乎完全无法识别 / 跑题严重`;
 
 /**
- * 把 prompt 里的 {rubric} 替换为题目评分细则。
+ * 老师没填"修改意见"指南时，给模型一个安全默认值 —— 让 feedback
+ * 至少覆盖常见的几个面向，不至于因为指令太空产生套话。
+ */
+export const DEFAULT_FEEDBACK_GUIDE = `请给出具体、可操作的修改建议（结合学生原文片段说明）：
+- **内容 / 思路**：审题是否准确、论点是否清晰、论据是否充分；
+- **结构 / 段落**：开头、过渡、结尾是否连贯，分段是否合理；
+- **语言 / 用词**：用词是否准确、句式是否多变、是否有口语化或重复；
+- **语法 / 标点**：错字、错句、标点错误。
+
+如果学生答得不错，请先**肯定具体的优点**，再提改进点；语气要中立、专业，避免空泛套话。`;
+
+/**
+ * 把 prompt 里的 {rubric} 替换为「给分细则 + 修改意见方向」的合并块。
  *
  * 设计要点：
+ * - 一个占位符（{rubric}）展开成两段（## 给分细则 + ## 修改意见方向），
+ *   保持模板兼容性 —— 老 prompt 里只有 {rubric} 不需要改。
  * - 用 split/join 而不是 String.replace(string, ...) —— 后者在 ES 里只替第一处，
  *   万一老师在 prompt 里写了多次 {rubric} 会漏。
- * - rubric 字面值不做转义：backend 用 str.replace 处理后续占位符（{student_name}
- *   等），不会被 rubric 里的花括号搞炸。
- * - rubric 为空 / 全空白 → 切到 NO_GRADING_RUBRIC_BLOCK，进入"只批注"模式。
+ * - rubric / feedbackGuide 字面值不做转义：backend 用 str.replace 处理后续占位符
+ *   （{student_name} 等），不会被花括号搞炸。
+ * - rubric 为空 / 全空白 → 切到 NO_GRADING_BLOCK，进入"只批注"模式。
+ * - feedbackGuide 为空 → 用 DEFAULT_FEEDBACK_GUIDE 兜底。
  * - 调用方应保证 prompt 包含 {rubric}（settings 保存时已校验，但兜底再加一层）。
  */
-export function substituteRubric(prompt: string, rubric: string | null): string {
-  const trimmed = (rubric ?? "").trim();
-  const block = trimmed === "" ? NO_GRADING_RUBRIC_BLOCK : trimmed;
+export function substituteRubric(
+  prompt: string,
+  rubric: string | null,
+  feedbackGuide?: string | null,
+): string {
+  const rubricText = (rubric ?? "").trim();
+  const guideText = (feedbackGuide ?? "").trim();
+
+  const parts: string[] = [];
+  if (rubricText === "") {
+    parts.push(NO_GRADING_BLOCK);
+  } else {
+    parts.push(`## 给分细则\n\n${rubricText}`);
+  }
+  parts.push(
+    `## 修改意见方向\n\n${guideText === "" ? DEFAULT_FEEDBACK_GUIDE : guideText}`,
+  );
+  const block = parts.join("\n\n");
+
   if (!prompt.includes(RUBRIC_PLACEHOLDER)) {
-    // 老 prompt 没有占位符，直接拼到末尾 —— 兜底，不让批改失败
-    const heading = trimmed === "" ? "# 批改方式" : "# 本题评分要求";
-    return `${prompt}\n\n${heading}\n\n${block}\n`;
+    return `${prompt}\n\n# 本题批改要求\n\n${block}\n`;
   }
   return prompt.split(RUBRIC_PLACEHOLDER).join(block);
 }

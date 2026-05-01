@@ -34,11 +34,12 @@ type Existing = {
   index: number;
   prompt: string;
   rubric: string | null;
+  feedbackGuide: string | null;
   customGradingPrompt: string | null;
   customSingleShotPrompt: string | null;
 };
 
-// 单一 placeholder 只能放一个题型示例；丰富示例靠下面的 RUBRIC_HINT 折叠展开。
+// 单一 placeholder 只能放一个题型示例；丰富示例靠下面的折叠展开。
 // 这里挑作文，因为它最复杂、最能展示"分维度 + 扣分项"完整结构。
 const RUBRIC_PLACEHOLDER_TEXT = `示例：
 
@@ -50,6 +51,16 @@ const RUBRIC_PLACEHOLDER_TEXT = `示例：
 严重跑题（题目要点完全未涉及）→ 立意维度最多 3 分，总分一般不超过 10。
 
 留空 = 模型只给修改建议、不打分。`;
+
+// 修改意见栏的 placeholder。给老师写"想让模型怎么写 feedback"的具体例子。
+const FEEDBACK_GUIDE_PLACEHOLDER_TEXT = `示例：
+
+- 用鼓励性的语气，先肯定一处具体的优点；
+- 重点指出语法 / 用词错误，引用学生原句说明；
+- 按段落分点给意见，每段不超过 3 句话；
+- 结尾给一句总评（不超过 30 字）。
+
+留空 = 用通用默认指南（覆盖内容 / 结构 / 语言 / 语法常见问题）。`;
 
 // 题型快速参考。按"复杂度从低到高"排，老师扫一眼能找到自己题型最接近的写法。
 const RUBRIC_EXAMPLES: { title: string; body: string }[] = [
@@ -147,8 +158,8 @@ export function UpsertQuestionDialog({
         <DialogHeader>
           <DialogTitle>{existing ? `编辑第 ${existing.index} 题` : "添加题目"}</DialogTitle>
           <DialogDescription>
-            题干 + 本题评分要求会一起送给 LLM。每道题独立配置评分要求 ──
-            题型相关的内容（满分、答案、给分点 / 扣分项）都写在这里。
+            题干会和下面两栏（给分细则 / 修改意见）一起送给 LLM。两栏都是可选的：
+            <strong>给分</strong>留空 → 不打分；<strong>修改意见</strong>留空 → 用通用默认。
           </DialogDescription>
         </DialogHeader>
         <form action={formAction} className="grid gap-4">
@@ -179,21 +190,20 @@ export function UpsertQuestionDialog({
           </div>
           <div className="grid gap-2">
             <Label htmlFor="rubric">
-              本题评分要求{" "}
+              给分细则{" "}
               <span className="text-xs font-normal text-muted-foreground">
-                可选 · 留空 = 只批注不打分
+                可选 · 留空 = 不打分（只批注）
               </span>
             </Label>
             <Textarea
               id="rubric"
               name="rubric"
-              rows={8}
+              rows={6}
               defaultValue={existing?.rubric ?? ""}
               placeholder={RUBRIC_PLACEHOLDER_TEXT}
             />
             <p className="text-xs text-muted-foreground">
-              <strong>每道题独立设置</strong>。把题型相关的内容（满分、标准答案、给分点 / 扣分项 / 评分流程）都写在这里 ──
-              不同题型（作文、选择、填空、默写、计算…）各写各的；通用的输出格式 / JSON 框架由设置页的全局模板统一处理，**这里不用管**。
+              写明本题<strong>满分多少、给分点 / 扣分项</strong>。不同题型（作文、选择、填空、默写、计算…）各写各的。
               <br />
               留空 = 模型只输出修改建议、不打分（适合开放作文、写作辅导这类没标准答案的题）。
             </p>
@@ -212,6 +222,27 @@ export function UpsertQuestionDialog({
                 ))}
               </div>
             </details>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="feedbackGuide">
+              修改意见{" "}
+              <span className="text-xs font-normal text-muted-foreground">
+                可选 · 留空 = 用通用默认指南
+              </span>
+            </Label>
+            <Textarea
+              id="feedbackGuide"
+              name="feedbackGuide"
+              rows={5}
+              defaultValue={existing?.feedbackGuide ?? ""}
+              placeholder={FEEDBACK_GUIDE_PLACEHOLDER_TEXT}
+            />
+            <p className="text-xs text-muted-foreground">
+              告诉模型<strong>怎么给学生写反馈</strong>：关注哪些方面、用什么语气、要不要分点、要不要先肯定优点等。
+              <br />
+              留空 = 用通用默认（覆盖内容 / 结构 / 语言 / 语法常见问题，专业中立的语气）。
+              和「给分细则」<strong>独立</strong>，可以"打分但用默认 feedback"，也可以"不打分但 feedback 有自定义指引"。
+            </p>
           </div>
 
           {/* ─── 高级：覆盖全局 prompt ─── */}

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import {
+  DEFAULT_FEEDBACK_GUIDE,
   DEFAULT_PROMPT_GRADING,
   DEFAULT_PROMPT_OCR,
   DEFAULT_PROMPT_SINGLE_SHOT,
@@ -34,6 +35,9 @@ export type WebSettingsView = {
   ocrPrompt: string;
   gradingPrompt: string;
   singleShotPrompt: string;
+  /// 全局默认"修改意见"指南。题目级 Question.feedbackGuide 留空时回落到这个；
+  /// 这里也留空字符串 = 用 model-catalog.ts:DEFAULT_FEEDBACK_GUIDE 硬编码兜底。
+  defaultFeedbackGuide: string;
 };
 
 // 非空 grading / single-shot prompt 必须含 {rubric} 占位符 —— 否则批改时
@@ -71,6 +75,8 @@ const updateSchema = z.object({
     .optional()
     .default("")
     .superRefine(requireRubricPlaceholder),
+  // 修改意见模板是纯文本指引（不参与 {rubric} 替换、不带占位符），4K 上限就够用。
+  defaultFeedbackGuide: z.string().max(4000).optional().default(""),
 });
 
 export type UpdateWebSettingsInput = z.infer<typeof updateSchema>;
@@ -97,6 +103,7 @@ const FALLBACK: WebSettingsView = {
   ocrPrompt: DEFAULT_PROMPT_OCR,
   gradingPrompt: DEFAULT_PROMPT_GRADING,
   singleShotPrompt: DEFAULT_PROMPT_SINGLE_SHOT,
+  defaultFeedbackGuide: DEFAULT_FEEDBACK_GUIDE,
 };
 
 export async function getWebSettings(): Promise<WebSettingsView> {
@@ -114,6 +121,7 @@ export async function getWebSettings(): Promise<WebSettingsView> {
     ocrPrompt: row.ocrPrompt ?? "",
     gradingPrompt: row.gradingPrompt ?? "",
     singleShotPrompt: row.singleShotPrompt ?? "",
+    defaultFeedbackGuide: row.defaultFeedbackGuide ?? "",
   };
 }
 
@@ -145,6 +153,7 @@ export async function updateWebSettingsAction(
       ocrPrompt: empty(data.ocrPrompt),
       gradingPrompt: empty(data.gradingPrompt),
       singleShotPrompt: empty(data.singleShotPrompt),
+      defaultFeedbackGuide: empty(data.defaultFeedbackGuide),
     },
     create: {
       userId,
@@ -158,6 +167,7 @@ export async function updateWebSettingsAction(
       ocrPrompt: empty(data.ocrPrompt),
       gradingPrompt: empty(data.gradingPrompt),
       singleShotPrompt: empty(data.singleShotPrompt),
+      defaultFeedbackGuide: empty(data.defaultFeedbackGuide),
     },
   });
   revalidatePath("/settings");
