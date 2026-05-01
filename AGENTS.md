@@ -459,3 +459,242 @@ npm run dev
 
 跨容器集成测试请用 `docker compose up`，不要在裸进程模式下连 docker network 里的
 backend 服务（除非用 `host.docker.internal` 或加上 host 映射）。
+
+## 十二、改完代码 → 本地测试 → 推送上线（标准发布流程）
+
+**铁律：不要改完直接 ssh 到 ECS 上 `docker compose pull`**。本地不验过的代码到
+线上炸 = 学生作业 / 老师 session 全停。下面是踩过坑总结的标准流程。
+
+### 12.1 流程总览
+
+```text
+改代码 ──▶ 本地静态检查 ──▶ 本地起 docker compose ──▶ 手动跑通核心链路
+                                                        │
+                                                        ▼
+                                  git commit ──▶ scripts/push-acr.sh
+                                                        │
+                                                        ▼
+                                              ssh ECS ──▶ docker compose pull
+                                                        │
+                                                        ▼
+                                              docker compose up -d ──▶ 验活
+                                                        │
+                                                        ▼
+                                                  炸了？ ──▶ 12.4 回滚
+```
+
+### 12.2 本地静态检查
+
+不同动到的部分跑不同的：
+
+| 改了什么 | 跑什么 |
+| --- | --- |
+| `core/` / `backend/` python 代码 | `uv run ruff check . && uv run pytest`（如果有用例）+ `uv run python scripts/smoke_api.py` 一定要跑（见 §十） |
+| `web/` ts/tsx | `cd web && npx tsc --noEmit && npm run lint` |
+| `web/prisma/schema.prisma` | 必须额外跑 `cd web && npx prisma migrate dev --name <短描述>` 生成 migration 文件，**不能** `db push` 上线 |
+| `prompts/*.md` | 跑一次 §十 的烟测 1～2，确认输出 JSON 还能 parse |
+| `docker-compose.yml` / `Dockerfile` | `docker compose config` 看一眼解析后的最终配置 |
+
+### 12.3 本地端到端验活
+
+最少要做这三件事，确认 web ↔ backend ↔ LLM 全链路通：
+
+```bash
+# 1) 本地起服务（用本地 build，不拉 ACR）
+docker compose down
+docker compose up -d --build
+docker compose ps   # 都应该是 healthy
+
+# 2) backend 探活
+curl -s http://127.0.0.1:8000/v1/livez | head -c 200
+
+# 3) web 探活 + 创建测试用户（如果 web/data/web.db 是干净的）
+curl -fsS http://127.0.0.1:3000/api/health
+docker compose exec web node scripts/create-user.cjs \
+  --email test@example.com --password testtest --name 老师
+
+# 4) 浏览器手动跑：
+#    登录 → 建班 → 建题（写 rubric）→ 上传图 → 一键批改 → 等到出分
+#    把刚才动的功能在 UI 上点过一遍
+
+# 5) 看 backend 日志是否报错
+docker compose logs --tail=200 backend
+docker compose logs --tail=200 web
+```
+
+如果改的是 schema，验活后还要确认 `web/data/web.db` 真的应用了新迁移：
+
+```bash
+docker compose exec web sh -c \
+  "node -e \"const p=require('@prisma/client');new p.PrismaClient().\$queryRaw\\\`PRAGMA table_info(Question)\\\`.then(r=>console.log(r))\""
+```
+
+或者直接 `docker compose exec web ls prisma/migrations/`。
+
+### 12.4 推送 ACR
+
+本地完全 OK 之后再 push。push 之前必须：
+
+1. **commit** —— `push-acr.sh` 会用 `git rev-parse --short HEAD` 当 tag。脏工作区
+   会带 `-dirty` 后缀，ECS 上 `:latest` 仍然会被覆盖，但 sha tag 就不能用来回滚
+   了。所以**先 commit**。
+1. 准备好 ACR 凭据（一次性，写到 shell rc 即可）：
+
+   ```bash
+   export ACR_NAMESPACE=inkfin
+   export ACR_USERNAME=inkfinite
+   export ACR_PASSWORD=<阿里云 ACR 控制台里设的固定密码>
+   ```
+
+1. 推：
+
+   ```bash
+   # 默认两个都推（backend + web）
+   ./scripts/push-acr.sh
+
+   # 只推动了的那个
+   SERVICES=web ./scripts/push-acr.sh
+   ```
+
+脚本会同时打 `:latest` 和 `:<git-sha>`，linux/amd64，约 3～5 分钟。M 系 Mac
+也能推（buildx + QEMU emulation）。
+
+### 12.5 ECS 上线
+
+```bash
+ssh aliyun
+cd ~/docker/akapen
+
+# 1) 确认 docker-compose.prod.yml 里写的是 ACR 镜像（不是 build:）
+grep image docker-compose.prod.yml
+
+# 2) 拉新版（ACR 内网加速，几秒到几十秒）
+dcp pull          # 这是 alias：docker compose -f docker-compose.yml -f docker-compose.prod.yml
+
+# 3) 滚动重启（depends_on: backend healthy 会保证 web 后于 backend 起）
+dcp up -d
+
+# 4) 验活
+dcp ps
+curl -fsS http://127.0.0.1:8000/v1/livez
+curl -fsS http://127.0.0.1:3000/api/health
+dcp logs --tail=80 backend
+dcp logs --tail=80 web
+
+# 5) Schema 改动会让 web 容器在 docker-entrypoint.sh 里自动跑 prisma migrate deploy。
+#    要确认实际跑过：
+dcp logs web | rg 'migrate|migration' | tail
+```
+
+具体的 alias 写法 / `docker-compose.prod.yml` 内容见 `docs/DEPLOY_HANDOFF.md`。
+
+### 12.6 出问题怎么回滚
+
+**永远先回滚再排查**，别让线上挂着想 debug。每次 push 都打了 sha tag，回滚很快：
+
+```bash
+# 找上一个能用的版本（看 git log 或 ACR 控制台）
+LAST_GOOD=abc1234
+
+ssh aliyun
+cd ~/docker/akapen
+
+# 临时改 docker-compose.prod.yml 把 :latest 改成 :$LAST_GOOD
+sed -i "s|:latest|:${LAST_GOOD}|g" docker-compose.prod.yml
+dcp pull && dcp up -d
+
+# 等本地修好了再 push 新版，把 prod.yml 改回 :latest
+```
+
+⚠ 如果回滚的是 web 服务且这次 push **包含 schema migration**，回滚的旧镜像不会
+"反向迁移"。要么提前备份 `web/data/web.db`（见 §十三），要么写一个 down
+migration（不推荐，prisma migrate 不太支持，建议宁可暂时停服等 hotfix）。
+
+### 12.7 不要做的事
+
+- ❌ ECS 上**直接改文件**（vim 大法）—— 跟 git 失联，下次拉镜像就被覆盖。
+  紧急时改先记录到 issue，回头再写到代码里。
+- ❌ `docker compose up --build` 在 ECS 上 build —— 2C2G 跑 next build 内存爆炸。
+  build 永远在本地 / CI / 强机器上做，ECS 只 pull。
+- ❌ 跳过本地验活直接 push（"很小的改动应该不会出问题"——这种话每次都打脸）。
+- ❌ push 后忘记 ssh 到 ECS `docker compose pull && up -d`——`:latest` 不会自动
+  生效。`pull_policy: always` 只在 `up` 时拉，不会替你周期性同步。
+
+## 十三、宿主机持久化 + 备份恢复
+
+容器无状态，所有 stateful 数据都在 ECS 宿主机的两个 bind mount 里：
+
+| 路径 | 内容 | 丢了的代价 |
+| --- | --- | --- |
+| `data/grading.db` (+ -wal/-shm) | backend 任务队列 / worker 状态 | 重启重新跑就行，不太重要 |
+| `data/uploads/` | backend 拉图后的标准化缓存 | 删了能重新拉，不重要 |
+| `data/records/` | 每条任务的 prompt + LLM 原始输出 | 复盘用，可丢可不丢 |
+| `data/logs/app.log*` | 应用日志 | 排障用，可丢 |
+| **`web/data/web.db`** | **老师账号 / 班级 / 学生 / 题目 / 批改结果** | **🔥 全没** |
+| **`web/data/uploads/`** | **学生作业原图（上传源）** | **🔥 全没，老师没法回看 / 重批** |
+
+挂载契约（在 `docker-compose.yml` 里）：
+
+- `./data:/app/data`（backend）
+- `./web/data:/app/data`（web）
+
+容器内用户 uid=1000；ECS 上的部署用户（默认 `inkfin`）也得是 1000，否则容器写不进去。
+
+### 13.1 备份
+
+`scripts/backup.sh` 一键备份两个核心目录：
+
+- 用宿主 python3 对 `*.db` 做在线 `.backup` 快照（避免 WAL 漏写）
+- tar 打包 `data/` + `web/data/`，排除 `*-wal` / `*-shm` / 老 logs / 临时上传
+- 可选 `BACKUP_OSS_BUCKET=...` 自动 ossutil 上传 OSS
+- 自动清理本机 N 天以前的 tar
+
+cron 装法（ECS 上一次性配好）：
+
+```bash
+ssh aliyun
+crontab -e
+# 加一行（每天凌晨 4 点跑，日志写到项目里方便 ssh 上去看）：
+0 4 * * * cd ~/docker/akapen && BACKUP_OSS_BUCKET=oss://my-bucket/akapen ./scripts/backup.sh >> data/logs/backup.log 2>&1
+```
+
+### 13.2 恢复
+
+```bash
+ssh aliyun
+cd ~/docker/akapen
+docker compose down
+
+# 1) 解包到一个临时目录，挑你要的那个 tar
+mkdir restore && cd restore
+tar -xzf /path/to/akapen_20260501_040000.tgz
+
+# 2) .bak 改回正式名（备份脚本会同时打包原 .db 和 .bak 快照，挑 .bak 是一致的）
+mv data/grading.db.bak data/grading.db
+mv web/data/web.db.bak web/data/web.db
+rm -f data/*.db-wal data/*.db-shm web/data/*.db-wal web/data/*.db-shm
+
+# 3) 覆盖回去
+cd ..
+rsync -av --delete restore/data/ data/
+rsync -av --delete restore/web/data/ web/data/
+
+# 4) 起服务
+docker compose up -d
+```
+
+⚠ rsync 用 `--delete` 会清掉目标里多出来的文件（比如恢复点之后传的图）。如果想
+保留，把 `--delete` 去掉。但 schema 不一致时混着用会出问题（恢复点的 web.db 不
+认识新文件名），所以要确保备份点的代码版本和当前镜像版本兼容。
+
+### 13.3 不要做的事
+
+- ❌ 直接 `cp web/data/web.db backup.db` 来备份 —— WAL 模式下会漏掉
+  `web.db-wal` 里没合并的最新事务。一定要走 `sqlite3 .backup` 或 python
+  `connection.backup()`（脚本里都有）。
+- ❌ 把 `data/` 目录挂到 NFS / 网盘 / 用 fuse 挂的 OSS 上 —— SQLite 在 NFS 上
+  fcntl 锁不可靠，会随机 corrupt。本地盘 ext4/xfs 才稳。
+- ❌ 在容器还在写的时候 tar 整个 `web/data/web.db` —— 大概率是不一致快照。要么
+  先 `docker compose stop web`，要么用脚本里的 `.backup` 路径。
+- ❌ 把备份 tar 留在 ECS 同一块盘上当唯一备份 —— 盘炸的时候一起炸。脚本默认会
+  让你传 OSS（异地容灾），别省这一步。
