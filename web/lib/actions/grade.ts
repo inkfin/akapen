@@ -13,17 +13,40 @@ import {
   type CreateTaskInput as AkapenCreateTaskInput,
 } from "@/lib/akapen";
 import { buildSignedImageUrl } from "@/lib/hmac";
-import { getWebSettings } from "@/lib/actions/settings";
+import { getWebSettings, type WebSettingsView } from "@/lib/actions/settings";
+import { substituteRubric } from "@/lib/model-catalog";
 
 /**
- * 把用户的 WebSettings 转成 akapen ProviderOverrides。
- * 所有字段都传 ——「前端配置 / 后端只服务」边界要求 backend 不再读自己的
- * data/settings.json 来跑 web 的任务。
+ * 把用户的 WebSettings + 单道题目的 rubric / customPrompt 拼成 ProviderOverrides。
+ *
+ * 三层 prompt 决策（优先级从高到低）：
+ *   1. question.customSingleShotPrompt / customGradingPrompt → 整段覆盖，不再注入 rubric
+ *   2. WebSettings.singleShotPrompt / gradingPrompt （含 {rubric} 占位符）→
+ *      用 question.rubric 替换占位符
+ *   3. 都为空 → 不传 prompt 字段，backend 用自己 prompts/*.md 默认（不推荐：
+ *      backend 默认 prompt 没有 rubric 概念，所有题目按一刀切的 100 分作文打分）
+ *
+ * 「前端配置 / 后端只服务」边界：backend 不读 data/settings.json，所有
+ * 决策都在 web 这边敲定，传 finalize 的 prompt 过去即可。
  */
-async function buildProviderOverrides(): Promise<
-  AkapenCreateTaskInput["providerOverrides"]
-> {
-  const s = await getWebSettings();
+function buildProviderOverridesForQuestion(
+  s: WebSettingsView,
+  question: { rubric: string; customGradingPrompt: string | null; customSingleShotPrompt: string | null },
+): AkapenCreateTaskInput["providerOverrides"] {
+  // single-shot prompt：custom > settings.singleShotPrompt 替换 rubric > 不传
+  const singleShotPrompt = question.customSingleShotPrompt
+    ? question.customSingleShotPrompt
+    : s.singleShotPrompt
+      ? substituteRubric(s.singleShotPrompt, question.rubric)
+      : undefined;
+
+  // grading prompt：custom > settings.gradingPrompt 替换 rubric > 不传
+  const gradingPrompt = question.customGradingPrompt
+    ? question.customGradingPrompt
+    : s.gradingPrompt
+      ? substituteRubric(s.gradingPrompt, question.rubric)
+      : undefined;
+
   return {
     provider: s.gradingProvider,
     model: s.gradingModel,
@@ -32,10 +55,9 @@ async function buildProviderOverrides(): Promise<
     enableSingleShot: s.enableSingleShot,
     gradingWithImage: s.gradingWithImage,
     gradingThinking: s.gradingThinking,
-    // prompt 留空 = WebSettings 字段为 NULL，backend 退回 prompts/*.md 默认；非空才传
     ocrPrompt: s.ocrPrompt || undefined,
-    gradingPrompt: s.gradingPrompt || undefined,
-    singleShotPrompt: s.singleShotPrompt || undefined,
+    gradingPrompt,
+    singleShotPrompt,
   };
 }
 
@@ -82,8 +104,8 @@ export async function gradeSubmissionsAction(
   const userId = await requireUserId();
   const result = { ok: 0, failed: 0, errors: [] as string[] };
 
-  // 老师的设置（model / prompts / 行为开关），整批共用
-  const providerOverrides = await buildProviderOverrides();
+  // 老师全局设置（model / prompts 模板 / 行为开关），所有题共用
+  const settings = await getWebSettings();
 
   // 一次性把 submission + 关联实体取出来，避免 N+1
   const submissions = await prisma.submission.findMany({
@@ -127,10 +149,16 @@ export async function gradeSubmissionsAction(
     try {
       const imageUrls = paths.map((p) => buildSignedImageUrl(p, 1800));
 
-      // 拼 question_context：题干 + 评分要点
-      const ctx = sub.question.rubric
-        ? `${sub.question.prompt}\n\n参考答案/评分要点：\n${sub.question.rubric}`
-        : sub.question.prompt;
+      // 每题独立的 prompt overrides（注入 rubric 或走 customPrompt 覆盖）
+      const providerOverrides = buildProviderOverridesForQuestion(
+        settings,
+        sub.question,
+      );
+
+      // 拼 question_context：题干 + 评分细则
+      // 注意：rubric 已经塞进 prompt 模板了，question_context 这里再带一份是
+      // 给 backend 在 prompt 顶部额外提示用的，让模型对题目背景多一份认知。
+      const ctx = `${sub.question.prompt}\n\n本题评分细则：\n${sub.question.rubric}`;
 
       const akapenRes = await createGradingTask({
         studentId: sub.student.externalId,

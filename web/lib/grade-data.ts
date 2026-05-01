@@ -5,7 +5,8 @@ import { prisma } from "@/lib/db";
  *
  * 输出形态（前端把它扁平化成 cells 矩阵）：
  *   - students: [{ id, externalId, name }]
- *   - questions: [{ id, index, prompt, maxScore }]
+ *   - questions: [{ id, index, prompt }]   ← 注意：满分不再在 question 上，而是
+ *                                              来自 latest.maxScore（LLM 输出，每题不同）
  *   - cells: { [questionId]: { [studentId]: CellState } }
  *
  * CellState 是 UI 关心的全部状态。重批之间的多版本 GradingTask 在这里只展示
@@ -22,8 +23,9 @@ export type CellState = {
     status: string;
     revision: number;
     finalScore: number | null;
-    // LLM 评分时实际用的满分（来自 result.max_score）；UI 显示优先用这个，
-    // null（未批改 / 任务挂了）时回退到 question.maxScore
+    // LLM 评分时实际用的满分（来自 result.max_score）。
+    // null = 还没批 / 任务跑挂了 —— UI 这时只显示 finalScore（没有就显示状态文案），
+    // 不再有 question 级别的"占位满分"可回退（设计上每题满分由 rubric 决定）。
     maxScore: number | null;
     reviewFlag: boolean;
     errorCode: string | null;
@@ -41,7 +43,6 @@ export type GradeBoardData = {
     id: string;
     index: number;
     prompt: string;
-    maxScore: number;
   }[];
   cells: Record<string, Record<string, CellState>>;
 };
@@ -124,7 +125,6 @@ export async function loadGradeBoard(
       id: q.id,
       index: q.index,
       prompt: q.prompt,
-      maxScore: q.maxScore,
     })),
     cells,
   };

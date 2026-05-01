@@ -52,12 +52,30 @@ export async function deleteBatchAction(formData: FormData) {
   redirect("/batches");
 }
 
+// 题目层评分细则 —— 必填。老师必须为每题填一段自然语言的"满分多少 / 给分点"，
+// 全局 prompt 模板里的 {rubric} 占位符会被替换成这段。
+//
+// customGradingPrompt / customSingleShotPrompt 是高级口子：填了就**整段覆盖**
+// 全局 prompt（不再走 {rubric} 替换），适合题型与全局模板差异大的场景。
 const questionCreate = z.object({
   batchId: z.string().min(1),
   index: z.coerce.number().int().min(1).max(99),
   prompt: z.string().min(1).max(4000),
-  rubric: z.string().max(4000).optional().or(z.literal("")),
-  maxScore: z.coerce.number().min(0).max(100).default(100),
+  rubric: z
+    .string()
+    .trim()
+    .min(4, "评分细则太短：至少写出本题满分和给分点")
+    .max(4000),
+  customGradingPrompt: z
+    .string()
+    .max(16000)
+    .optional()
+    .or(z.literal("")),
+  customSingleShotPrompt: z
+    .string()
+    .max(16000)
+    .optional()
+    .or(z.literal("")),
 });
 
 export async function upsertQuestionAction(
@@ -70,11 +88,19 @@ export async function upsertQuestionAction(
     index: formData.get("index"),
     prompt: formData.get("prompt"),
     rubric: formData.get("rubric"),
-    maxScore: formData.get("maxScore"),
+    customGradingPrompt: formData.get("customGradingPrompt"),
+    customSingleShotPrompt: formData.get("customSingleShotPrompt"),
   });
   if (!parsed.success) {
     return { error: parsed.error.errors[0]?.message ?? "题目数据无效" };
   }
+
+  const data = {
+    prompt: parsed.data.prompt.trim(),
+    rubric: parsed.data.rubric.trim(),
+    customGradingPrompt: parsed.data.customGradingPrompt?.trim() || null,
+    customSingleShotPrompt: parsed.data.customSingleShotPrompt?.trim() || null,
+  };
 
   await prisma.question.upsert({
     where: {
@@ -83,15 +109,9 @@ export async function upsertQuestionAction(
     create: {
       batchId: parsed.data.batchId,
       index: parsed.data.index,
-      prompt: parsed.data.prompt.trim(),
-      rubric: parsed.data.rubric?.trim() || null,
-      maxScore: parsed.data.maxScore,
+      ...data,
     },
-    update: {
-      prompt: parsed.data.prompt.trim(),
-      rubric: parsed.data.rubric?.trim() || null,
-      maxScore: parsed.data.maxScore,
-    },
+    update: data,
   });
   revalidatePath(`/batches/${parsed.data.batchId}`);
   return { ok: true };

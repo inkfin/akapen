@@ -19,7 +19,7 @@ import type { CellState } from "@/lib/grade-data";
 type Props = {
   batchId: string;
   student: { id: string; externalId: string; name: string };
-  question: { id: string; index: number; prompt: string; maxScore: number };
+  question: { id: string; index: number; prompt: string };
   cell: CellState;
   onClose: () => void;
 };
@@ -109,10 +109,14 @@ export function CellDetailSheet({
           {cell.latest?.finalScore !== null &&
           cell.latest?.finalScore !== undefined ? (
             <div className="text-2xl font-semibold">
-              {cell.latest.finalScore}{" "}
-              <span className="text-base text-muted-foreground">
-                / {cell.latest.maxScore ?? question.maxScore}
-              </span>
+              {cell.latest.finalScore}
+              {cell.latest.maxScore ? (
+                <span className="text-base text-muted-foreground">
+                  {" / "}{cell.latest.maxScore}
+                </span>
+              ) : (
+                <span className="text-base text-muted-foreground"> 分</span>
+              )}
             </div>
           ) : null}
           {cell.latest?.errorMessage ? (

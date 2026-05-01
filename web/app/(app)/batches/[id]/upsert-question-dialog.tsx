@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { Pencil, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -33,9 +33,19 @@ type Existing = {
   id: string;
   index: number;
   prompt: string;
-  rubric: string | null;
-  maxScore: number;
+  rubric: string;
+  customGradingPrompt: string | null;
+  customSingleShotPrompt: string | null;
 };
+
+const RUBRIC_PLACEHOLDER_TEXT = `示例：
+
+本题满分 30 分。
+- 立意紧扣题目（10 分）：是否回答了题目要求；论点是否清晰
+- 论据 / 例证（10 分）：列举的事例是否真实；与论点是否相关
+- 语言表达（10 分）：用词、语法、句式
+
+严重跑题（题目要点完全未涉及）→ 立意维度最多 3 分，总分一般不超过 10。`;
 
 export function UpsertQuestionDialog({
   batchId,
@@ -48,6 +58,9 @@ export function UpsertQuestionDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [state, formAction] = useActionState(upsertQuestionAction, undefined);
+  const [advancedOpen, setAdvancedOpen] = useState(
+    !!(existing?.customGradingPrompt || existing?.customSingleShotPrompt),
+  );
 
   useEffect(() => {
     if (state?.ok) {
@@ -71,67 +84,110 @@ export function UpsertQuestionDialog({
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[640px]">
         <DialogHeader>
           <DialogTitle>{existing ? `编辑第 ${existing.index} 题` : "添加题目"}</DialogTitle>
           <DialogDescription>
-            题干会作为 question_context 送给批改 LLM；评分要点选填，给模型多一份提示。
+            题干 + 评分细则会一起送给 LLM。每道题独立配评分细则（满分、给分点）。
           </DialogDescription>
         </DialogHeader>
         <form action={formAction} className="grid gap-4">
           <input type="hidden" name="batchId" value={batchId} />
-          <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-2">
-              <Label htmlFor="index">题号</Label>
-              <Input
-                id="index"
-                name="index"
-                type="number"
-                min={1}
-                max={99}
-                required
-                defaultValue={existing?.index ?? defaultIndex}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="maxScore">满分（占位）</Label>
-              <Input
-                id="maxScore"
-                name="maxScore"
-                type="number"
-                min={0}
-                max={100}
-                step="0.5"
-                required
-                defaultValue={existing?.maxScore ?? 100}
-              />
-              <p className="text-xs text-muted-foreground">
-                实际满分由批改 prompt 决定；这里只在未批改 / LLM 没返回 max_score
-                时作 UI 占位。
-              </p>
-            </div>
+          <div className="grid gap-2">
+            <Label htmlFor="index">题号</Label>
+            <Input
+              id="index"
+              name="index"
+              type="number"
+              min={1}
+              max={99}
+              required
+              defaultValue={existing?.index ?? defaultIndex}
+              className="max-w-32"
+            />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="prompt">题干</Label>
+            <Label htmlFor="prompt">题干 *</Label>
             <Textarea
               id="prompt"
               name="prompt"
               required
-              rows={4}
+              rows={3}
               defaultValue={existing?.prompt ?? ""}
               placeholder="请用 200 字以内描述「家乡的秋天」"
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="rubric">评分要点 / 参考答案（可选）</Label>
+            <Label htmlFor="rubric">
+              评分细则（rubric）*{" "}
+              <span className="text-xs font-normal text-muted-foreground">
+                必填，决定本题如何打分
+              </span>
+            </Label>
             <Textarea
               id="rubric"
               name="rubric"
-              rows={4}
+              required
+              rows={6}
               defaultValue={existing?.rubric ?? ""}
-              placeholder="给模型多一份提示。例如：要求结构完整、辞藻丰富、有真情实感"
+              placeholder={RUBRIC_PLACEHOLDER_TEXT}
             />
+            <p className="text-xs text-muted-foreground">
+              老师只需要写"本题满分多少分 + 给分点 / 扣分项"，输出 JSON 格式 /
+              评分流程等技术细节由「设置」里的全局 prompt 框架负责。
+            </p>
           </div>
+
+          {/* ─── 高级：覆盖全局 prompt ─── */}
+          <div className="rounded-md border">
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((v) => !v)}
+              className="flex w-full items-center gap-2 p-3 text-left text-sm font-medium"
+            >
+              {advancedOpen ? (
+                <ChevronDown className="size-4" />
+              ) : (
+                <ChevronRight className="size-4" />
+              )}
+              高级：单题自定义 prompt（极少需要）
+            </button>
+            {advancedOpen ? (
+              <div className="space-y-4 border-t p-3">
+                <p className="text-xs text-muted-foreground">
+                  填了下面任意一栏，会**整段替换**全局批改 prompt，不再走 {"{rubric}"}{" "}
+                  注入。仅当本题题型与全局模板差异巨大时使用（比如全局是中文作文，本题是数学应用题）。
+                </p>
+                <div className="grid gap-2">
+                  <Label htmlFor="customSingleShotPrompt" className="text-xs">
+                    自定义 single-shot prompt（视觉一次过模式）
+                  </Label>
+                  <Textarea
+                    id="customSingleShotPrompt"
+                    name="customSingleShotPrompt"
+                    rows={6}
+                    defaultValue={existing?.customSingleShotPrompt ?? ""}
+                    placeholder="留空 = 用「设置」里的全局 single-shot prompt（推荐）"
+                    className="font-mono text-xs"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="customGradingPrompt" className="text-xs">
+                    自定义批改 prompt（OCR + 批改两步模式）
+                  </Label>
+                  <Textarea
+                    id="customGradingPrompt"
+                    name="customGradingPrompt"
+                    rows={6}
+                    defaultValue={existing?.customGradingPrompt ?? ""}
+                    placeholder="留空 = 用「设置」里的全局批改 prompt"
+                    className="font-mono text-xs"
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+
           <DialogFooter>
             <Submit existing={!!existing} />
           </DialogFooter>

@@ -83,52 +83,68 @@ export default async function BatchDetailPage({
               <TableRow>
                 <TableHead className="w-16">题号</TableHead>
                 <TableHead>题干</TableHead>
-                <TableHead className="w-40">评分要点</TableHead>
-                <TableHead className="w-20">满分</TableHead>
+                <TableHead className="w-72">评分细则（rubric）</TableHead>
                 <TableHead className="w-24 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {batch.questions.length === 0 ? (
-                <TableEmpty colSpan={5} message="还没有题目 —— 点右上角「添加题目」" />
+                <TableEmpty colSpan={4} message="还没有题目 —— 点右上角「添加题目」" />
               ) : (
-                batch.questions.map((q) => (
-                  <TableRow key={q.id}>
-                    <TableCell className="font-mono">{q.index}</TableCell>
-                    <TableCell className="max-w-md whitespace-pre-wrap">{q.prompt}</TableCell>
-                    <TableCell className="max-w-xs whitespace-pre-wrap text-xs text-muted-foreground">
-                      {q.rubric ?? "—"}
-                    </TableCell>
-                    <TableCell>{q.maxScore}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <UpsertQuestionDialog
-                          batchId={batch.id}
-                          defaultIndex={q.index}
-                          existing={{
-                            id: q.id,
-                            index: q.index,
-                            prompt: q.prompt,
-                            rubric: q.rubric,
-                            maxScore: q.maxScore,
-                          }}
-                        />
-                        <form action={deleteQuestionAction}>
-                          <input type="hidden" name="id" value={q.id} />
-                          <input type="hidden" name="batchId" value={batch.id} />
-                          <Button
-                            type="submit"
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`删除第 ${q.index} 题`}
-                          >
-                            <Trash2 className="size-4 text-destructive" />
-                          </Button>
-                        </form>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
+                batch.questions.map((q) => {
+                  const hasCustomPrompt =
+                    !!q.customGradingPrompt || !!q.customSingleShotPrompt;
+                  return (
+                    <TableRow key={q.id}>
+                      <TableCell className="font-mono">{q.index}</TableCell>
+                      <TableCell className="max-w-md whitespace-pre-wrap">
+                        {q.prompt}
+                      </TableCell>
+                      <TableCell className="max-w-xs space-y-1">
+                        <p className="line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
+                          {q.rubric}
+                        </p>
+                        {hasCustomPrompt ? (
+                          <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                            ⚙ 已覆盖全局 prompt
+                          </p>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <UpsertQuestionDialog
+                            batchId={batch.id}
+                            defaultIndex={q.index}
+                            existing={{
+                              id: q.id,
+                              index: q.index,
+                              prompt: q.prompt,
+                              rubric: q.rubric,
+                              customGradingPrompt: q.customGradingPrompt,
+                              customSingleShotPrompt: q.customSingleShotPrompt,
+                            }}
+                          />
+                          <form action={deleteQuestionAction}>
+                            <input type="hidden" name="id" value={q.id} />
+                            <input
+                              type="hidden"
+                              name="batchId"
+                              value={batch.id}
+                            />
+                            <Button
+                              type="submit"
+                              variant="ghost"
+                              size="icon"
+                              aria-label={`删除第 ${q.index} 题`}
+                            >
+                              <Trash2 className="size-4 text-destructive" />
+                            </Button>
+                          </form>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>

@@ -21,7 +21,7 @@ type CellLabel = {
   pending: boolean; // 是否需要继续轮询
 };
 
-function describeCell(c: CellState, fallbackMaxScore: number): CellLabel {
+function describeCell(c: CellState): CellLabel {
   if (!c.submissionId) {
     return { text: "未交", variant: "outline", pending: false };
   }
@@ -29,18 +29,22 @@ function describeCell(c: CellState, fallbackMaxScore: number): CellLabel {
     return { text: "已交未批", variant: "info", pending: false };
   }
   const t = c.latest;
-  // 优先用 LLM 真实输出的 max（来自 result.max_score）；没有的兜底到题目登记值
-  const max = t.maxScore ?? fallbackMaxScore;
+  // 满分以 LLM 真实输出的 max_score 为准（每题 rubric 不同 → max 不同）。
+  // 还没拿到（任务跑挂 / 老数据）就只显示 finalScore，不再有占位满分。
   switch (t.status) {
-    case "succeeded":
+    case "succeeded": {
+      if (t.finalScore === null) {
+        return { text: "已批", variant: "success", pending: false };
+      }
+      const text = t.maxScore
+        ? `${t.finalScore}/${t.maxScore}`
+        : `${t.finalScore} 分`;
       return {
-        text:
-          t.finalScore !== null
-            ? `${t.finalScore}/${max}${t.reviewFlag ? " ⚠" : ""}`
-            : "已批",
+        text: `${text}${t.reviewFlag ? " ⚠" : ""}`,
         variant: t.reviewFlag ? "warning" : "success",
         pending: false,
       };
+    }
     case "failed":
       return { text: "失败", variant: "destructive", pending: false };
     case "queued":
@@ -303,7 +307,7 @@ export function GradeBoard({
                   {data.questions.map((q) => {
                     const c = data.cells[q.id]?.[s.id];
                     if (!c) return <td key={q.id} className="border-l p-2" />;
-                    const label = describeCell(c, q.maxScore);
+                    const label = describeCell(c);
                     const isSelected =
                       c.submissionId && selected.has(c.submissionId);
                     return (

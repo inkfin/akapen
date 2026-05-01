@@ -10,6 +10,7 @@ import {
   DEFAULT_PROMPT_GRADING,
   DEFAULT_PROMPT_OCR,
   DEFAULT_PROMPT_SINGLE_SHOT,
+  RUBRIC_PLACEHOLDER,
 } from "@/lib/model-catalog";
 
 async function requireUserId() {
@@ -35,6 +36,19 @@ export type WebSettingsView = {
   singleShotPrompt: string;
 };
 
+// 非空 grading / single-shot prompt 必须含 {rubric} 占位符 —— 否则批改时
+// 没法把题目级评分细则注入进去，每题都按一刀切的全局标准评分（典型症状：
+// 30 分填空和 100 分作文都判成同一个满分）。空串 = 用 backend 默认，OK。
+function requireRubricPlaceholder(s: string, ctx: z.RefinementCtx) {
+  if (s.length === 0) return;
+  if (!s.includes(RUBRIC_PLACEHOLDER)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `必须包含占位符 ${RUBRIC_PLACEHOLDER}（题目评分细则会替换进来）`,
+    });
+  }
+}
+
 const updateSchema = z.object({
   gradingProvider: z.string().trim().min(1).max(64),
   gradingModel: z.string().trim().min(1).max(128),
@@ -45,8 +59,18 @@ const updateSchema = z.object({
   ocrModel: z.string().trim().min(1).max(128),
   // prompt 留空 = 用 backend 默认；直接存 NULL
   ocrPrompt: z.string().max(16000).optional().default(""),
-  gradingPrompt: z.string().max(16000).optional().default(""),
-  singleShotPrompt: z.string().max(16000).optional().default(""),
+  gradingPrompt: z
+    .string()
+    .max(16000)
+    .optional()
+    .default("")
+    .superRefine(requireRubricPlaceholder),
+  singleShotPrompt: z
+    .string()
+    .max(16000)
+    .optional()
+    .default("")
+    .superRefine(requireRubricPlaceholder),
 });
 
 export type UpdateWebSettingsInput = z.infer<typeof updateSchema>;

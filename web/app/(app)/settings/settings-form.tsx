@@ -22,6 +22,7 @@ import {
   DEFAULT_PROMPT_SINGLE_SHOT,
   GRADING_MODELS,
   OCR_MODELS,
+  RUBRIC_PLACEHOLDER,
   findGradingModel,
   findOcrModel,
   isLikelyVisionModel,
@@ -122,10 +123,14 @@ export function SettingsForm({ initial }: { initial: WebSettingsView }) {
       {/* ────── 主区：批改 prompt ────── */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">批改提示词</CardTitle>
+          <CardTitle className="text-base">批改提示词模板（全局框架）</CardTitle>
           <p className="text-xs text-muted-foreground">
-            告诉模型怎么改作文 ── 评分维度、扣分细则、输出格式。默认是中文作文 100
-            分模板，schema 已对齐。改完点保存就生效。
+            这里写"输出 JSON 格式 / 评分流程"等通用框架；每道题的具体满分 / 给分点
+            在题目页填的「评分细则」（rubric）里写。Prompt 必须含{" "}
+            <code className="rounded bg-muted px-1 font-mono text-[11px]">
+              {RUBRIC_PLACEHOLDER}
+            </code>{" "}
+            占位符，批改时会自动替换成对应题目的 rubric。
           </p>
         </CardHeader>
         <CardContent>
@@ -145,13 +150,14 @@ export function SettingsForm({ initial }: { initial: WebSettingsView }) {
               )
             }
             rows={10}
+            requireRubric
             onReset={() => {
               if (gradingIsVision) {
                 update("singleShotPrompt", DEFAULT_PROMPT_SINGLE_SHOT);
               } else {
                 update("gradingPrompt", DEFAULT_PROMPT_GRADING);
               }
-              toast.success("已重置为推荐模板（中文作文 100 分）");
+              toast.success("已重置为推荐模板（含 {rubric} 占位符）");
             }}
           />
         </CardContent>
@@ -236,6 +242,7 @@ export function SettingsForm({ initial }: { initial: WebSettingsView }) {
                   value={s.gradingPrompt}
                   onChange={(v) => update("gradingPrompt", v)}
                   rows={6}
+                  requireRubric
                   onReset={() => {
                     update("gradingPrompt", DEFAULT_PROMPT_GRADING);
                     toast.success("已重置");
@@ -402,13 +409,20 @@ function PromptField({
   onChange,
   rows,
   onReset,
+  requireRubric,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   rows: number;
   onReset?: () => void;
+  /** 非空时必须包含 {rubric} 占位符。空串 OK（= 走 backend 默认）。 */
+  requireRubric?: boolean;
 }) {
+  const missingRubric =
+    !!requireRubric &&
+    value.length > 0 &&
+    !value.includes(RUBRIC_PLACEHOLDER);
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between">
@@ -434,7 +448,14 @@ function PromptField({
         rows={rows}
         placeholder="留空 = 用 backend 默认"
         className="font-mono text-xs"
+        aria-invalid={missingRubric}
       />
+      {missingRubric ? (
+        <p className="text-xs text-destructive">
+          缺少 <code className="font-mono">{RUBRIC_PLACEHOLDER}</code>{" "}
+          占位符。保存会被拒绝 ── 点上方「重置为推荐模板」可以一键修复。
+        </p>
+      ) : null}
     </div>
   );
 }

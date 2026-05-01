@@ -76,15 +76,28 @@ model HomeworkBatch {
 }
 
 model Question {
-  id          String       @id @default(cuid())
-  batchId     String
-  index       Int           // 第几题，UI 排序 + 学生上传时选择
-  prompt      String        // 题干，会作为 question_context 送 akapen
-  rubric      String?       // 评分要点 / 标准答案，可选
-  maxScore    Float        @default(100)
+  id      String @id @default(cuid())
+  batchId String
+  index   Int // 第几题，UI 排序 + 学生上传时选择
+  prompt  String // 题干，会作为 question_context 送 akapen
+
+  /// 本题的评分细则（**必填**）：满分多少、给分点、扣分项。
+  /// 全局 grading prompt 模板里的 `{rubric}` 占位符会被替换成这段文字。
+  /// 不再需要 maxScore 字段——满分写在 rubric 里就行（"本题满分 30 分"），
+  /// LLM 实际用的 max 来自 GradingTask.maxScore（`result.max_score`）。
+  rubric String
+
+  /// 高级：单题自定义"批改 prompt（两步模式）"。
+  /// 留 NULL = 用 WebSettings 的全局 gradingPrompt（替换 {rubric} 后送 LLM）；
+  /// 非空 = **整段覆盖**全局 prompt，不再走 {rubric} 替换。
+  customGradingPrompt String?
+
+  /// 高级：单题自定义 single-shot prompt（视觉一次过）。同上规则。
+  customSingleShotPrompt String?
+
   batch       HomeworkBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
   submissions Submission[]
-  createdAt   DateTime     @default(now())
+  createdAt   DateTime      @default(now())
 
   @@unique([batchId, index])
   @@index([batchId])
@@ -159,9 +172,9 @@ model GradingTask {
   status         String     @default("pending")
   result         String?    // 完整 GradingResult JSON 字符串
   finalScore     Float?     // 抽出来方便排序 / 筛选
-  // LLM 实际用的满分（与 GradingResult.max_score 同源）。Question.maxScore 是
-  // 老师建题时填的"期望满分"，但实际 max 由批改 prompt 决定，UI 显示优先用这个，
-  // 跑完批改才填；老题 / 跑挂的任务为 null，UI fallback 到 question.maxScore。
+  // LLM 实际用的满分（与 GradingResult.max_score 同源）。
+  // 来源：题目的 rubric 里写的"本题满分 X 分"被 LLM 读到后回填。
+  // 还没批改完 / 任务跑挂了 = null，UI 这时只显示 finalScore（不再有 question 占位满分）。
   maxScore       Float?
   reviewFlag     Boolean    @default(false)
   errorCode      String?
