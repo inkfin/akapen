@@ -531,79 +531,116 @@ docker compose exec web sh -c \
 
 或者直接 `docker compose exec web ls prisma/migrations/`。
 
-### 12.4 推送 ACR
+### 12.4 推送 ACR + GitHub Release（推荐）
 
-本地完全 OK 之后再 push。push 之前必须：
+**铁律：先 commit + push 到 origin 再发版**。`release.sh` 会做 git 干净检查 + tag
+检查，绝对不允许带 dirty 工作区或者本地未 push 的 commit 发版（不然 ACR 镜像和
+GitHub release 不可复现）。
 
-1. **commit** —— `push-acr.sh` 会用 `git rev-parse --short HEAD` 当 tag。脏工作区
-   会带 `-dirty` 后缀，ECS 上 `:latest` 仍然会被覆盖，但 sha tag 就不能用来回滚
-   了。所以**先 commit**。
-1. 准备好 ACR 凭据（一次性，写到 shell rc 即可）：
+一次性配置 ACR 凭据（写到 `~/.zshrc` 之类）：
 
-   ```bash
-   export ACR_NAMESPACE=inkfin
-   export ACR_USERNAME=inkfinite
-   export ACR_PASSWORD=<阿里云 ACR 控制台里设的固定密码>
-   ```
+```bash
+export ACR_NAMESPACE=inkfin
+export ACR_USERNAME=inkfinite
+export ACR_PASSWORD=<阿里云 ACR 控制台设的固定密码>
+```
 
-1. 推：
+发版（推荐路径）：
 
-   ```bash
-   # 默认两个都推（backend + web）
-   ./scripts/push-acr.sh
+```bash
+# 1) 走标准 release：build + push 镜像 + 上传部署清单到 GitHub Release
+./scripts/release.sh v0.1.0
 
-   # 只推动了的那个
-   SERVICES=web ./scripts/push-acr.sh
-   ```
+# 2) patch / 临时小版本（不打人类可读 tag）：
+./scripts/release.sh           # 自动用 v0.0.0-<git-sha>
 
-脚本会同时打 `:latest` 和 `:<git-sha>`，linux/amd64，约 3～5 分钟。M 系 Mac
-也能推（buildx + QEMU emulation）。
+# 3) 不小心把 release 内容打错了，要重传同一版本：
+REPLACE=1 ./scripts/release.sh v0.1.0
+```
 
-### 12.5 ECS 上线
+`release.sh` 做的事：
+
+1. 校验 git 干净 + 已 push origin
+1. `git tag $VERSION && git push origin $VERSION`
+1. 调用 `push-acr.sh` 推镜像（同时打 `:latest`、`:<git-sha>`、`:<version>` 三个 tag）
+1. 打包部署清单 tar：`docker-compose.yml`、`docker-compose.prod.yml`（**镜像 tag
+   钉死成 `:<version>`**）、`.env.example`、`web/.env.example`、`scripts/backup.sh`、
+   `docs/DEPLOY_HANDOFF.md`、现场生成的一页纸 `INSTALL.md`
+1. `gh release create $VERSION akapen-deploy.tar.gz`，artifact 名稳定不带版本号
+   → GitHub 永远稳定的 latest URL：
+   `https://github.com/inkfin/akapen/releases/latest/download/akapen-deploy.tar.gz`
+
+**只想推镜像不发 release**（比如 hotfix 还在迭代、不打 tag）：
+
+```bash
+./scripts/push-acr.sh                # 只 build + push :latest + :<sha>
+```
+
+ECS 那边手动改 docker-compose.prod.yml 的 tag 即可。但**正式发版尽量走 release.sh**，
+保证镜像 + 部署清单一致可回溯。
+
+### 12.5 ECS 上线 / 升级
+
+**首次部署**（新 ECS 没东西）：
 
 ```bash
 ssh aliyun
-cd ~/docker/akapen
+mkdir -p ~/akapen && cd ~/akapen
 
-# 1) 确认 docker-compose.prod.yml 里写的是 ACR 镜像（不是 build:）
-grep image docker-compose.prod.yml
+# 拉最新 release 的部署清单（含所有需要的 compose / env example / 文档 / 备份脚本）
+curl -fL https://github.com/inkfin/akapen/releases/latest/download/akapen-deploy.tar.gz | tar -xz
 
-# 2) 拉新版（ACR 内网加速，几秒到几十秒）
-dcp pull          # 这是 alias：docker compose -f docker-compose.yml -f docker-compose.prod.yml
+# 跟着 INSTALL.md / docs/DEPLOY_HANDOFF.md 配 .env、起服
+```
 
-# 3) 滚动重启（depends_on: backend healthy 会保证 web 后于 backend 起）
-dcp up -d
+**升级现有部署到新版本**：
 
-# 4) 验活
+```bash
+ssh aliyun
+cd ~/akapen
+
+# 方案 A：覆盖 docker-compose.prod.yml 让镜像 tag 跟着新 release 走
+curl -fL https://github.com/inkfin/akapen/releases/latest/download/akapen-deploy.tar.gz \
+  | tar -xz docker-compose.prod.yml docs/DEPLOY_HANDOFF.md
+
+dcp pull && dcp up -d
+
+# 方案 B：原 prod.yml 写的是 :latest（漂移版）+ pull_policy: always，
+#         那升级根本不用换 prod.yml，直接：
+dcp pull && dcp up -d
+
+# 验活
 dcp ps
 curl -fsS http://127.0.0.1:8000/v1/livez
 curl -fsS http://127.0.0.1:3000/api/health
 dcp logs --tail=80 backend
 dcp logs --tail=80 web
 
-# 5) Schema 改动会让 web 容器在 docker-entrypoint.sh 里自动跑 prisma migrate deploy。
-#    要确认实际跑过：
+# Schema 改动会让 web 容器在 docker-entrypoint.sh 里自动跑 prisma migrate deploy。
+# 确认实际跑过：
 dcp logs web | rg 'migrate|migration' | tail
 ```
 
-具体的 alias 写法 / `docker-compose.prod.yml` 内容见 `docs/DEPLOY_HANDOFF.md`。
+`dcp` 是 alias：`docker compose -f docker-compose.yml -f docker-compose.prod.yml`。
+具体写法见 `docs/DEPLOY_HANDOFF.md`。
 
 ### 12.6 出问题怎么回滚
 
-**永远先回滚再排查**，别让线上挂着想 debug。每次 push 都打了 sha tag，回滚很快：
+**永远先回滚再排查**，别让线上挂着想 debug。
 
 ```bash
-# 找上一个能用的版本（看 git log 或 ACR 控制台）
-LAST_GOOD=abc1234
-
 ssh aliyun
-cd ~/docker/akapen
+cd ~/akapen
 
-# 临时改 docker-compose.prod.yml 把 :latest 改成 :$LAST_GOOD
-sed -i "s|:latest|:${LAST_GOOD}|g" docker-compose.prod.yml
+# 方案 A（推荐）：拉某个旧 release 的部署清单 —— 它的 prod.yml 已经钉死了那个版本的镜像
+LAST_GOOD=v0.1.2
+curl -fL https://github.com/inkfin/akapen/releases/download/${LAST_GOOD}/akapen-deploy.tar.gz \
+  | tar -xz docker-compose.prod.yml
 dcp pull && dcp up -d
 
-# 等本地修好了再 push 新版，把 prod.yml 改回 :latest
+# 方案 B：手动改 prod.yml 的 tag（适合临时切到某个 git short sha）
+sed -i "s|:[a-z0-9]\{7,\}|:abc1234|g" docker-compose.prod.yml
+dcp pull && dcp up -d
 ```
 
 ⚠ 如果回滚的是 web 服务且这次 push **包含 schema migration**，回滚的旧镜像不会
