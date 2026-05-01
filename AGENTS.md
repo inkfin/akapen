@@ -482,65 +482,57 @@ backend 服务（除非用 `host.docker.internal` 或加上 host 映射）。
 | `prompts/*.md` | 跑一次 §十 的烟测 1～2，确认 LLM 输出还能 parse |
 | `Dockerfile` / `docker-compose.yml` | `docker compose config` 看一眼解析后的 yaml |
 
-### 12.3 本地端到端验活
+### 12.3 本地端到端验活（agent 自动跑，用户在浏览器验收）
 
-本地开发循环用 `uv run` + `npm run dev`，HMR 秒级。`docker compose up --build`
-不进开发循环，仅以下情况跑（next build + wheel 安装本机要数分钟）：
+完整链路涉及 backend + web 互联 + LLM 调用 + SQLite 卷挂载，单独 `uv run`
+无法覆盖 web；裸跑 `npm run dev` 又要手动配一堆 env 与 webhook secret。
+统一走 `docker compose`，以"agent 自检 + 起服 → 用户浏览器体验"为标准流程。
 
-- 改了 `Dockerfile` / `docker-compose.yml` / `docker-entrypoint.sh`
-- 想模拟容器内卷挂载 / env 注入的运行时（极少需要）
-
-#### 12.3.1 改了 backend / core / prompts
+agent 改完代码后**自动跑**：
 
 ```bash
-# 终端 1：起 backend
-uv run python -m backend.app
-# 终端 2：跑烟测（5 路覆盖见 §十）
-uv run python scripts/smoke_api.py
-```
-
-只改 `prompts/*.md`：跑烟测 1～2 即可。
-
-#### 12.3.2 改了 web/
-
-```bash
-cd web
-
-# 终端 1：dev server
-DATABASE_URL=file:./data/web.db \
-AUTH_SECRET=devdevdevdevdevdevdevdevdevdevde \
-WEBHOOK_SECRET=devdevdevdevdevdevdevdevdevdevde \
-IMAGE_URL_SECRET=devdevdevdevdevdevdevdevdevdevde \
-AKAPEN_BASE_URL=http://localhost:8000 \
-AKAPEN_API_KEY=<.env 里 API_KEYS=akapen:<这串>> \
-WEB_PUBLIC_BASE_URL=http://localhost:3000 \
-npm run dev
-
-# 终端 2（首次或 schema 改动后）：装迁移 + 创老师账号
-DATABASE_URL=file:./data/web.db npx prisma migrate dev
-DATABASE_URL=file:./data/web.db npm run create-user -- \
-  --email test@example.com --password testtest --name 老师
-
-# 终端 3：起 backend 给 web 调（验完整链路时）
-uv run python -m backend.app
-```
-
-#### 12.3.3 改了 Dockerfile / compose / entrypoint
-
-```bash
-docker compose config | head -50   # 先 lint yaml
+# 1) 静态检查通过后再起服（见 12.2）
+# 2) 干净起一遍（带 build；首次 5～10 分钟，之后增量很快）
 docker compose down
 docker compose up -d --build
-docker compose ps                  # 都应 healthy
+
+# 3) 等所有容器 healthy
+docker compose ps
+
+# 4) 探活
 curl -fsS http://127.0.0.1:8000/v1/livez
 curl -fsS http://127.0.0.1:3000/api/health
-docker compose logs --tail=200 backend web
-docker compose down
+
+# 5) 如果改了 schema，确认 prisma migrate 跑过
+docker compose logs web | rg 'migrate|migration' | tail
 ```
 
-#### 12.3.4 浏览器手动跑
+容器跑起来之后，agent 把以下信息丢给用户：
 
-UI 改动收尾走一遍：登录 → 建班 → 建题（写 rubric）→ 上传图 → 一键批改 → 出分。
+- 浏览器入口：<http://localhost:3000>
+- 测试账号（首次部署用 `docker compose exec web node scripts/create-user.cjs ...` 建一个）
+- 这次改动需要用户重点验的 UI 路径
+
+agent 不要替用户跑完整业务流（登录 → 建班 → 建题 → 上传图 → 批改 → 出分）—
+那条链路要烧 LLM token + 真图，且 LLM 输出是黑盒，用户肉眼验更可靠。
+
+#### 加速：只改了 backend 的 python 代码
+
+如果改的只是 `core/` / `backend/` / `prompts/` 而 web 不动，可以省掉
+`--build`（python wheel 已 cache）：
+
+```bash
+docker compose up -d --build backend
+```
+
+或者只跑 backend 烟测（不需要 web）：
+
+```bash
+uv run python -m backend.app           # 终端 1
+uv run python scripts/smoke_api.py     # 终端 2
+```
+
+但只要碰了 `web/`，就回到上面的完整 `docker compose up -d --build`。
 
 ### 12.4 推送 ACR + 发 GitHub Release
 
@@ -647,7 +639,9 @@ dcp pull && dcp up -d
 
 ### 12.7 反模式
 
-- ❌ 本地开发循环跑 `docker compose up --build` —— 用 `uv run` + `npm run dev`（12.3.1～2）
+- ❌ 用 `uv run` + 裸跑 `npm run dev` 替代 `docker compose` 验 e2e —— web 端
+  少了 webhook secret / volume 挂载等环境，复现度低；agent 必须用 docker compose
+  起完整链路再交给用户验
 - ❌ ECS 上直接 vim 改文件 —— 跟 git 失联，下次拉镜像会被覆盖
 - ❌ ECS 上跑 `docker compose up --build` —— 2C2G 内存不够 next build
 - ❌ 跳过本地验活直接 push
