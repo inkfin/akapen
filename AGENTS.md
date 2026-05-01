@@ -690,10 +690,46 @@ cron 装法（ECS 上一次性配好）：
 
 ```bash
 ssh aliyun
+# 1) 先手跑一次确认脚本本身没问题（cron 出问题 90% 是 PATH / 环境变量问题）
+cd ~/docker/akapen && ./scripts/backup.sh
+
+# 2) 配 ossutil（异地容灾，强烈建议）
+curl -L https://gosspublic.alicdn.com/ossutil/v2/2.0.4/ossutil-2.0.4-linux-amd64.zip -o /tmp/o.zip
+unzip /tmp/o.zip -d /tmp/ && sudo mv /tmp/ossutil-*-linux-amd64/ossutil /usr/local/bin/
+ossutil config -e oss-cn-shenzhen.aliyuncs.com -i <ak> -k <sk>  # 用 RAM 子账号，只授对应 bucket 写权限
+
+# 3) 加 cron
 crontab -e
-# 加一行（每天凌晨 4 点跑，日志写到项目里方便 ssh 上去看）：
+# 末尾加（每天凌晨 4 点跑，凌晨服务器空闲；日志写到项目里方便 ssh 上去看）：
 0 4 * * * cd ~/docker/akapen && BACKUP_OSS_BUCKET=oss://my-bucket/akapen ./scripts/backup.sh >> data/logs/backup.log 2>&1
 ```
+
+cron 常见坑：
+
+- **PATH 太短**：cron 默认 `PATH=/usr/bin:/bin`。本脚本只用 `python3 / tar / find /
+  ossutil`，前三个都在 PATH 里；ossutil 装到 `/usr/local/bin/` 默认也在。如果你
+  把 ossutil 装到别的地方，crontab 顶部加一行 `PATH=/usr/local/bin:/usr/bin:/bin`。
+- **路径必须绝对或先 cd**：cron 工作目录是 `$HOME`，不是项目根。所以 cron 里要么
+  写 `cd ~/docker/akapen && ./scripts/backup.sh`（推荐），要么写绝对路径
+  `~/docker/akapen/scripts/backup.sh`。
+- **OSS 上传失败不算整体失败**：脚本设计上只警告不退出，本机 tar 还在 `/tmp`，
+  可以手动 `ossutil cp` 补传。日志里搜 "✗" 就能看到。
+- **logrotate**：`backup.log` 是 append 模式，几个月后会几十 MB。开 logrotate：
+
+  ```bash
+  sudo tee /etc/logrotate.d/akapen-backup <<'EOF'
+  /home/inkfin/docker/akapen/data/logs/backup.log {
+      weekly
+      rotate 4
+      compress
+      missingok
+      notifempty
+      copytruncate
+  }
+  EOF
+  ```
+
+不推荐 systemd timer 替 cron（更工程化但配置文件多两个，给老师端这种规模没必要）。
 
 ### 13.2 恢复
 
