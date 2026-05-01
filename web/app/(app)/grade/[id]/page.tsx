@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, BarChart3 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { auth } from "@/lib/auth";
@@ -29,17 +29,23 @@ export default async function GradePage({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Button asChild variant="ghost" size="icon">
-              <Link href="/batches">
+              <Link href={`/batches/${data.batchId}`} aria-label="返回作业批次">
                 <ArrowLeft className="size-4" />
               </Link>
             </Button>
             <div>
               <h1 className="text-xl font-semibold">{data.batchTitle}</h1>
               <p className="text-sm text-muted-foreground">
-                {data.className} · {data.students.length} 名学生 · {data.questions.length} 题
+                批改大盘 · {data.className} · {data.students.length} 名学生 · {data.questions.length} 题
               </p>
             </div>
           </div>
+          {/* 跳到只读的成绩页 —— 给"已经批完想看汇总"的老师一个清晰出口 */}
+          <Button asChild variant="outline">
+            <Link href={`/results/${data.batchId}`}>
+              <BarChart3 className="size-4" /> 看成绩
+            </Link>
+          </Button>
         </div>
         <GradeBoard initialData={data} batchId={data.batchId} />
       </div>

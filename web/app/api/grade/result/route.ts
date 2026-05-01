@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { parseGradingResult, type ParsedGradingResult } from "@/lib/grading-result";
 
 // 拉单条 GradingTask 的完整 result（GradingResult JSON）+ transcription 摘要。
 //
@@ -15,63 +16,13 @@ import { prisma } from "@/lib/db";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type ResultPayload = {
+type ResultPayload = ParsedGradingResult & {
   gradingTaskId: string;
   status: string;
-  finalScore: number | null;
-  maxScore: number | null;
   reviewFlag: boolean;
-  reviewReasons: string[];
-  feedback: string;
-  confidence: number | null;
-  notes: string | null;
-  // 维度细分；不打分 / 老数据可能是空数组
-  dimensionScores: Array<{
-    name: string;
-    score: number;
-    max: number;
-    deductions: Array<{ rule: string; points: number; evidence: string | null }>;
-  }>;
-  // grading result 内部的 transcription（"模型校对后的最终文本"）。
-  // 跟 GradingTask.transcription（如果存在）可能不一致，这里以 result 为准。
-  transcription: string;
-  // 原始错误（status=failed 时）
   errorCode: string | null;
   errorMessage: string | null;
 };
-
-function parseResult(raw: string | null): Partial<ResultPayload> {
-  if (!raw) return {};
-  try {
-    // result 是 GradingResult.model_dump_json() 的输出 —— pydantic 字段名是 snake_case
-    const r = JSON.parse(raw);
-    return {
-      finalScore: r.final_score ?? null,
-      maxScore: r.max_score ?? null,
-      reviewReasons: Array.isArray(r.review_reasons) ? r.review_reasons : [],
-      feedback: typeof r.feedback === "string" ? r.feedback : "",
-      confidence: typeof r.confidence === "number" ? r.confidence : null,
-      notes: typeof r.notes === "string" ? r.notes : null,
-      dimensionScores: Array.isArray(r.dimension_scores)
-        ? r.dimension_scores.map((d: Record<string, unknown>) => ({
-            name: String(d.name ?? ""),
-            score: Number(d.score ?? 0),
-            max: Number(d.max ?? 0),
-            deductions: Array.isArray(d.deductions)
-              ? (d.deductions as Array<Record<string, unknown>>).map((x) => ({
-                  rule: String(x.rule ?? ""),
-                  points: Number(x.points ?? 0),
-                  evidence: typeof x.evidence === "string" ? x.evidence : null,
-                }))
-              : [],
-          }))
-        : [],
-      transcription: typeof r.transcription === "string" ? r.transcription : "",
-    };
-  } catch {
-    return {};
-  }
-}
 
 export async function GET(req: Request) {
   const session = await auth();
@@ -96,19 +47,17 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "任务不存在或无权查看" }, { status: 404 });
   }
 
-  const parsed = parseResult(t.result);
+  const parsed = parseGradingResult(t.result);
   const payload: ResultPayload = {
-    gradingTaskId: t.id,
-    status: t.status,
+    ...parsed,
+    // GradingTask 列里的 finalScore / maxScore 是 webhook 直接落的快照，
+    // 与 result JSON 同源；优先用列字段（不需要再 parse JSON 拿）—— 二者只在
+    // 极少数老数据 / 漂移场景才会不一致，这里以列字段为准。
     finalScore: t.finalScore,
     maxScore: t.maxScore,
+    gradingTaskId: t.id,
+    status: t.status,
     reviewFlag: t.reviewFlag,
-    reviewReasons: parsed.reviewReasons ?? [],
-    feedback: parsed.feedback ?? "",
-    confidence: parsed.confidence ?? null,
-    notes: parsed.notes ?? null,
-    dimensionScores: parsed.dimensionScores ?? [],
-    transcription: parsed.transcription ?? "",
     errorCode: t.errorCode,
     errorMessage: t.errorMessage,
   };

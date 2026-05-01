@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Users, BookOpen, ClipboardCheck, Settings, LogOut } from "lucide-react";
+import { Users, BookOpen, BarChart3, Settings, LogOut } from "lucide-react";
 
 import { auth, signOut } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -10,10 +10,12 @@ async function signOutAction() {
   await signOut({ redirectTo: "/login" });
 }
 
+// 「批改」不是顶层入口（它是作业批次的一个 action），所以 NAV 里不放。
+// 「成绩」是顶层入口：老师查班级聚合分数 / 题目通过率，跟"动手批改"的工作流分开。
 const NAV = [
   { href: "/classes", label: "班级 / 学生", icon: Users },
   { href: "/batches", label: "作业批次", icon: BookOpen },
-  { href: "/grade", label: "批改大盘", icon: ClipboardCheck },
+  { href: "/results", label: "成绩", icon: BarChart3 },
   { href: "/settings", label: "设置", icon: Settings },
 ];
 

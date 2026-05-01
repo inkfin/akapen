@@ -81,12 +81,21 @@ model Question {
   index   Int // 第几题，UI 排序 + 学生上传时选择
   prompt  String // 题干，会作为 question_context 送 akapen
 
+  /// 是否需要打分。true = 走给分细则评分；false = 只批注，模型不输出
+  /// final_score / max_score / dimension_scores（适合开放作文 / 写作辅导）。
+  ///
+  /// 之前是用"rubric 是否为空"隐式推断 —— 改成显式 boolean 后：
+  /// 1) 状态可观察（DB / API / UI 一致），UI 能区分"应打分但 LLM 漏给"和"题本身不打分"；
+  /// 2) 允许"打分但 rubric 暂存草稿"或"暂时关掉打分但保留 rubric"的中间态；
+  /// 3) 成绩页 SQL hot query 直接 `WHERE requireGrading = true`，不用解析空串。
+  ///
+  /// **不变式**：requireGrading=true 时 rubric 必须非空（前后端双层校验）。
+  requireGrading Boolean @default(true)
+
   /// 本题的**给分细则**：满分多少、给分点、扣分项。
-  /// **留空** = "只批注 / 不打分"：LLM 只输出 transcription + feedback，
-  /// 不输出 final_score / max_score / dimension_scores。适合开放作文等无标准答案的题。
-  /// **非空** = 正常打分：全局 grading prompt 模板里的 `{rubric}` 占位符
-  /// 会被替换成这段文字；满分由 LLM 根据 rubric 字面识别（"本题满分 30 分"），
-  /// 实际用的 max 回填到 GradingTask.maxScore。
+  /// `requireGrading=true` 时**必填**；`=false` 时可以留 NULL 也可以留草稿（用 toggle 控制）。
+  /// 全局 grading prompt 模板里的 `{rubric}` 占位符会被替换成这段文字；
+  /// 满分由 LLM 根据 rubric 字面识别（"本题满分 30 分"），实际用的 max 回填到 GradingTask.maxScore。
   rubric String?
 
   /// 本题的**修改意见指南**：希望模型给学生写哪类反馈、关注哪些方面、用什么语气。

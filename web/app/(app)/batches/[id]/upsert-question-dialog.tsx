@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight, Pencil, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +34,7 @@ type Existing = {
   id: string;
   index: number;
   prompt: string;
+  requireGrading: boolean;
   rubric: string | null;
   feedbackGuide: string | null;
   customGradingPrompt: string | null;
@@ -48,9 +50,7 @@ const RUBRIC_PLACEHOLDER_TEXT = `示例：
 - 论据 / 例证（10 分）：列举的事例是否真实；与论点是否相关
 - 语言表达（10 分）：用词、语法、句式
 
-严重跑题（题目要点完全未涉及）→ 立意维度最多 3 分，总分一般不超过 10。
-
-留空 = 模型只给修改建议、不打分。`;
+严重跑题（题目要点完全未涉及）→ 立意维度最多 3 分，总分一般不超过 10。`;
 
 // 修改意见栏的 placeholder。给老师写"想让模型怎么写 feedback"的具体例子。
 const FEEDBACK_GUIDE_PLACEHOLDER_TEXT = `示例：
@@ -112,7 +112,7 @@ const RUBRIC_EXAMPLES: { title: string; body: string }[] = [
   },
   {
     title: "只批注 · 不打分",
-    body: `（rubric 留空就行 —— 模型会只输出修改建议、不给分。
+    body: `（顶部「需要打分」开关关掉就行 —— 模型只会输出修改建议、不给分。
 适合开放作文、写作辅导这类没有标准答案的题。）`,
   },
 ];
@@ -131,6 +131,16 @@ export function UpsertQuestionDialog({
   const [advancedOpen, setAdvancedOpen] = useState(
     !!(existing?.customGradingPrompt || existing?.customSingleShotPrompt),
   );
+  // requireGrading 是显式 boolean 列；新建题默认 true（按打分走）。
+  // 受控 + 隐藏 input：避免依赖 checkbox 的 native FormData 行为（unchecked 不发字段），
+  // 把 "true"/"false" 字面值塞给 server action 的 z.preprocess 解析。
+  const [requireGrading, setRequireGrading] = useState<boolean>(
+    existing?.requireGrading ?? true,
+  );
+  // rubric 用受控 state 而不是 defaultValue —— 否则切换 requireGrading 时 textarea
+  // 在 DOM 树位置变了（外层 vs 嵌进 details），React 会卸载重挂，**用户没保存的草稿
+  // 会被 defaultValue 覆盖**。受控 state 在两种渲染分支间共享，切了再切回来还在。
+  const [rubric, setRubric] = useState<string>(existing?.rubric ?? "");
 
   useEffect(() => {
     if (state?.ok) {
@@ -158,12 +168,17 @@ export function UpsertQuestionDialog({
         <DialogHeader>
           <DialogTitle>{existing ? `编辑第 ${existing.index} 题` : "添加题目"}</DialogTitle>
           <DialogDescription>
-            题干会和下面两栏（给分细则 / 修改意见）一起送给 LLM。两栏都是可选的：
-            <strong>给分</strong>留空 → 不打分；<strong>修改意见</strong>留空 → 用通用默认。
+            题干 + 给分细则 / 修改意见会一起送给 LLM。
+            <strong>需要打分</strong>开关关掉 → 模型只批注、不给分（适合开放作文）。
           </DialogDescription>
         </DialogHeader>
         <form action={formAction} className="grid gap-4">
           <input type="hidden" name="batchId" value={batchId} />
+          <input
+            type="hidden"
+            name="requireGrading"
+            value={requireGrading ? "true" : "false"}
+          />
           <div className="grid gap-2">
             <Label htmlFor="index">题号</Label>
             <Input
@@ -188,40 +203,90 @@ export function UpsertQuestionDialog({
               placeholder="请用 200 字以内描述「家乡的秋天」"
             />
           </div>
+
+          {/* 需要打分开关 —— 控制下方 rubric 折叠 + server 端必填校验 */}
+          <div className="flex items-start gap-3 rounded-md border bg-muted/30 p-3">
+            <Checkbox
+              id="requireGrading"
+              checked={requireGrading}
+              onCheckedChange={(v) => setRequireGrading(v === true)}
+            />
+            <div className="flex-1 space-y-0.5">
+              <Label htmlFor="requireGrading" className="cursor-pointer text-sm">
+                需要打分
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                打开 = 按下方<strong>给分细则</strong>评分（必填）；
+                关掉 = 模型只输出修改建议，不给具体分数 / 不参与成绩榜。
+              </p>
+            </div>
+          </div>
+
+          {/*
+            rubric textarea：受控 state，避免切换 requireGrading 时草稿丢失。
+            - requireGrading=true → 大字段 + required + 题型示例展开
+            - requireGrading=false → 折进 details，草稿保留在 state 里；标签提示
+              "本字段暂不生效"。提交时 server 端 substituteRubric 会忽略 rubric 走
+              NO_GRADING_BLOCK，所以这里草稿提交到 DB 也不会真影响本次批改。
+          */}
           <div className="grid gap-2">
             <Label htmlFor="rubric">
-              给分细则{" "}
-              <span className="text-xs font-normal text-muted-foreground">
-                可选 · 留空 = 不打分（只批注）
-              </span>
+              给分细则
+              {requireGrading ? (
+                <span className="text-destructive"> *</span>
+              ) : (
+                <span className="text-xs font-normal text-muted-foreground">
+                  （已关掉打分，本字段暂不生效）
+                </span>
+              )}
             </Label>
-            <Textarea
-              id="rubric"
-              name="rubric"
-              rows={6}
-              defaultValue={existing?.rubric ?? ""}
-              placeholder={RUBRIC_PLACEHOLDER_TEXT}
-            />
-            <p className="text-xs text-muted-foreground">
-              写明本题<strong>满分多少、给分点 / 扣分项</strong>。不同题型（作文、选择、填空、默写、计算…）各写各的。
-              <br />
-              留空 = 模型只输出修改建议、不打分（适合开放作文、写作辅导这类没标准答案的题）。
-            </p>
-            <details className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
-              <summary className="cursor-pointer font-medium">
-                查看不同题型的写法示例（点击展开）
-              </summary>
-              <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                {RUBRIC_EXAMPLES.map((ex) => (
-                  <div key={ex.title} className="rounded-md border bg-background p-2">
-                    <div className="mb-1 font-medium">{ex.title}</div>
-                    <pre className="font-mono text-[11px] whitespace-pre-wrap text-muted-foreground">
-                      {ex.body}
-                    </pre>
+            {requireGrading ? (
+              <>
+                <Textarea
+                  id="rubric"
+                  name="rubric"
+                  rows={6}
+                  required
+                  value={rubric}
+                  onChange={(e) => setRubric(e.target.value)}
+                  placeholder={RUBRIC_PLACEHOLDER_TEXT}
+                />
+                <p className="text-xs text-muted-foreground">
+                  写明本题<strong>满分多少、给分点 / 扣分项</strong>。不同题型（作文、选择、填空、默写、计算…）各写各的。
+                  需要打分时<strong>必填</strong>，留空会被服务端拒绝。
+                </p>
+                <details className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
+                  <summary className="cursor-pointer font-medium">
+                    查看不同题型的写法示例（点击展开）
+                  </summary>
+                  <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                    {RUBRIC_EXAMPLES.map((ex) => (
+                      <div key={ex.title} className="rounded-md border bg-background p-2">
+                        <div className="mb-1 font-medium">{ex.title}</div>
+                        <pre className="font-mono text-[11px] whitespace-pre-wrap text-muted-foreground">
+                          {ex.body}
+                        </pre>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </details>
+                </details>
+              </>
+            ) : (
+              <details className="rounded-md border px-3 py-2 text-xs">
+                <summary className="cursor-pointer text-muted-foreground">
+                  展开查看 / 编辑草稿（保存后不影响本次批改）
+                </summary>
+                <Textarea
+                  id="rubric"
+                  name="rubric"
+                  rows={6}
+                  value={rubric}
+                  onChange={(e) => setRubric(e.target.value)}
+                  className="mt-2"
+                  placeholder={RUBRIC_PLACEHOLDER_TEXT}
+                />
+              </details>
+            )}
           </div>
           <div className="grid gap-2">
             <Label htmlFor="feedbackGuide">

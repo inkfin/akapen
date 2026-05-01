@@ -14,7 +14,7 @@ import {
 } from "@/lib/akapen";
 import { buildSignedImageUrl } from "@/lib/hmac";
 import { getWebSettings, type WebSettingsView } from "@/lib/actions/settings";
-import { isNoGradingQuestion, substituteRubric } from "@/lib/model-catalog";
+import { substituteRubric } from "@/lib/model-catalog";
 
 /**
  * 把用户的 WebSettings + 单道题目的 rubric / feedbackGuide / customPrompt
@@ -36,6 +36,7 @@ import { isNoGradingQuestion, substituteRubric } from "@/lib/model-catalog";
 function buildProviderOverridesForQuestion(
   s: WebSettingsView,
   question: {
+    requireGrading: boolean;
     rubric: string | null;
     feedbackGuide: string | null;
     customGradingPrompt: string | null;
@@ -50,18 +51,24 @@ function buildProviderOverridesForQuestion(
     (s.defaultFeedbackGuide && s.defaultFeedbackGuide.trim()) ||
     null;
 
+  const subOpts = {
+    requireGrading: question.requireGrading,
+    rubric: question.rubric,
+    feedbackGuide: effectiveFeedbackGuide,
+  };
+
   // single-shot prompt：custom > settings.singleShotPrompt 替换 rubric > 不传
   const singleShotPrompt = question.customSingleShotPrompt
     ? question.customSingleShotPrompt
     : s.singleShotPrompt
-      ? substituteRubric(s.singleShotPrompt, question.rubric, effectiveFeedbackGuide)
+      ? substituteRubric(s.singleShotPrompt, subOpts)
       : undefined;
 
   // grading prompt：custom > settings.gradingPrompt 替换 rubric > 不传
   const gradingPrompt = question.customGradingPrompt
     ? question.customGradingPrompt
     : s.gradingPrompt
-      ? substituteRubric(s.gradingPrompt, question.rubric, effectiveFeedbackGuide)
+      ? substituteRubric(s.gradingPrompt, subOpts)
       : undefined;
 
   return {
@@ -175,11 +182,11 @@ export async function gradeSubmissionsAction(
       // 拼 question_context：题干（+ 给分细则 / 修改意见指引，如果填了）
       // 注意：rubric / feedbackGuide 已经塞进 prompt 模板了，question_context 这里
       // 再带一份是给 backend 在 prompt 顶部额外提示用的，让模型对题目背景多一份认知。
-      // "只批注"模式（rubric 为空）下不重复带"给分细则"段，避免 prompt 自相矛盾；
+      // requireGrading=false 时不重复带"给分细则"段，避免 prompt 自相矛盾；
       // feedbackGuide 留空时也省略，让模型自己用默认 feedback 方向。
       const ctxParts: string[] = [sub.question.prompt];
-      if (!isNoGradingQuestion(sub.question.rubric)) {
-        ctxParts.push(`本题给分细则：\n${sub.question.rubric}`);
+      if (sub.question.requireGrading && sub.question.rubric && sub.question.rubric.trim()) {
+        ctxParts.push(`本题给分细则：\n${sub.question.rubric.trim()}`);
       }
       if (sub.question.feedbackGuide && sub.question.feedbackGuide.trim()) {
         ctxParts.push(`修改意见方向：\n${sub.question.feedbackGuide.trim()}`);

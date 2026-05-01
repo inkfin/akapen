@@ -21,7 +21,7 @@ type CellLabel = {
   pending: boolean; // 是否需要继续轮询
 };
 
-function describeCell(c: CellState): CellLabel {
+function describeCell(c: CellState, requireGrading: boolean): CellLabel {
   if (!c.submissionId) {
     return { text: "未交", variant: "outline", pending: false };
   }
@@ -30,15 +30,23 @@ function describeCell(c: CellState): CellLabel {
   }
   const t = c.latest;
   // 满分以 LLM 真实输出的 max_score 为准（每题 rubric 不同 → max 不同）。
-  // 还没拿到（任务跑挂 / 老数据）就只显示 finalScore，不再有占位满分。
-  // finalScore=null 且 status=succeeded → "只批注"模式（题目没填 rubric）：
-  // 模型只给修改建议，没分数。徽章用 info 蓝色和"已批注"文案区分于普通"已批"。
+  // finalScore=null 时的语义靠 question.requireGrading 区分（不能再用 finalScore===null
+  // 一刀切）：
+  //   - requireGrading=false → 题本身就不打分，正常"已批注"（info）
+  //   - requireGrading=true  → 应打分但 LLM 漏给了，异常"应打未打"（destructive）
   switch (t.status) {
     case "succeeded": {
       if (t.finalScore === null) {
+        if (!requireGrading) {
+          return {
+            text: t.reviewFlag ? "已批注 ⚠" : "已批注",
+            variant: t.reviewFlag ? "warning" : "info",
+            pending: false,
+          };
+        }
         return {
-          text: t.reviewFlag ? "已批注 ⚠" : "已批注",
-          variant: t.reviewFlag ? "warning" : "info",
+          text: "应打未打 ⚠",
+          variant: "destructive",
           pending: false,
         };
       }
@@ -313,7 +321,7 @@ export function GradeBoard({
                   {data.questions.map((q) => {
                     const c = data.cells[q.id]?.[s.id];
                     if (!c) return <td key={q.id} className="border-l p-2" />;
-                    const label = describeCell(c);
+                    const label = describeCell(c, q.requireGrading);
                     const isSelected =
                       c.submissionId && selected.has(c.submissionId);
                     return (

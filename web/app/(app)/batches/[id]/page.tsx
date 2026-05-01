@@ -1,7 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ClipboardCheck, Smartphone, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  BarChart3,
+  ClipboardCheck,
+  Smartphone,
+  Trash2,
+} from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -64,6 +71,11 @@ export default async function BatchDetailPage({
               <Smartphone className="size-4" /> 移动端上传
             </Link>
           </Button>
+          <Button asChild variant="outline">
+            <Link href={`/results/${batch.id}`}>
+              <BarChart3 className="size-4" /> 看成绩
+            </Link>
+          </Button>
           <Button asChild>
             <Link href={`/grade/${batch.id}`}>
               <ClipboardCheck className="size-4" /> 进入批改
@@ -82,6 +94,7 @@ export default async function BatchDetailPage({
             <TableHeader>
               <TableRow>
                 <TableHead className="w-16">题号</TableHead>
+                <TableHead className="w-24">类型</TableHead>
                 <TableHead>题干</TableHead>
                 <TableHead className="w-64">给分细则</TableHead>
                 <TableHead className="w-56">修改意见</TableHead>
@@ -90,7 +103,7 @@ export default async function BatchDetailPage({
             </TableHeader>
             <TableBody>
               {batch.questions.length === 0 ? (
-                <TableEmpty colSpan={5} message="还没有题目 —— 点右上角「添加题目」" />
+                <TableEmpty colSpan={6} message="还没有题目 —— 点右上角「添加题目」" />
               ) : (
                 batch.questions.map((q) => {
                   const hasCustomPrompt =
@@ -98,17 +111,30 @@ export default async function BatchDetailPage({
                   return (
                     <TableRow key={q.id}>
                       <TableCell className="font-mono">{q.index}</TableCell>
+                      <TableCell>
+                        {q.requireGrading ? (
+                          <Badge variant="default">打分</Badge>
+                        ) : (
+                          <Badge variant="info">只批注</Badge>
+                        )}
+                      </TableCell>
                       <TableCell className="max-w-md whitespace-pre-wrap">
                         {q.prompt}
                       </TableCell>
                       <TableCell className="max-w-xs space-y-1">
-                        {q.rubric && q.rubric.trim() ? (
-                          <p className="line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
-                            {q.rubric}
-                          </p>
+                        {q.requireGrading ? (
+                          q.rubric && q.rubric.trim() ? (
+                            <p className="line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
+                              {q.rubric}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-destructive">
+                              缺给分细则 —— 请补全
+                            </p>
+                          )
                         ) : (
-                          <p className="text-xs text-sky-600 dark:text-sky-400">
-                            💬 不打分
+                          <p className="text-xs text-muted-foreground/70">
+                            （已关掉打分）
                           </p>
                         )}
                         {hasCustomPrompt ? (
@@ -137,6 +163,7 @@ export default async function BatchDetailPage({
                               id: q.id,
                               index: q.index,
                               prompt: q.prompt,
+                              requireGrading: q.requireGrading,
                               rubric: q.rubric,
                               feedbackGuide: q.feedbackGuide,
                               customGradingPrompt: q.customGradingPrompt,

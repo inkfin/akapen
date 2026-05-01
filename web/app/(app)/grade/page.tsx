@@ -1,11 +1,7 @@
-// 占位 —— grade-ui 阶段会替换为「学生 × 题号」批改大盘。
+import { redirect } from "next/navigation";
+
+// 「批改」从 sidebar 移除后这条 URL 不再是顶层入口，但旧链接 / 书签可能还在用，
+// 直接跳回作业批次列表，老师会自然从那里再点「批改」进入。
 export default function GradeIndexPage() {
-  return (
-    <div className="space-y-2">
-      <h1 className="text-xl font-semibold">批改大盘</h1>
-      <p className="text-sm text-muted-foreground">
-        请先去「作业批次」选一份作业再进入批改。
-      </p>
-    </div>
-  );
+  redirect("/batches");
 }

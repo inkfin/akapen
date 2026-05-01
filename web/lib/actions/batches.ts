@@ -53,24 +53,47 @@ export async function deleteBatchAction(formData: FormData) {
   redirect("/batches");
 }
 
-// 题目层批改要求 —— 拆成两路独立 optional 字段：
-// - rubric（给分细则）：填了 = 按这段打分；留空 = "只批注"模式不打分。
+// 题目层批改要求：
+// - requireGrading（是否打分）：true = 走给分细则评分；false = 只批注。
+// - rubric（给分细则）：requireGrading=true 时**必填**（非空白）；=false 时可留空。
 // - feedbackGuide（修改意见指南）：填了 = 按指引写 feedback；留空 = 用通用默认指南。
-// 二者完全独立，可以"打分但用默认 feedback"，也可以"不打分但 feedback 有自定义指引"。
 //
 // customGradingPrompt / customSingleShotPrompt 是高级口子：填了就**整段覆盖**
 // 全局 prompt（不再走 {rubric} 替换），适合题型与全局模板差异大的场景。
 // 它们是条件渲染的（藏在「高级」折叠里），所以必须用 optionalText —— 老师没
 // 展开时这俩 key 在 FormData 里就根本不存在，naive schema 会爆 "Invalid input"。
-const questionCreate = z.object({
-  batchId: z.string().min(1),
-  index: z.coerce.number().int().min(1).max(99),
-  prompt: z.string().min(1).max(4000),
-  rubric: optionalText(4000),
-  feedbackGuide: optionalText(4000),
-  customGradingPrompt: optionalText(16000),
-  customSingleShotPrompt: optionalText(16000),
-});
+//
+// FormData 里 checkbox / switch 没勾选时根本不会发字段；勾了就发 "on"/"true"/"1"。
+// 用 z.preprocess 把缺省也归一化成 boolean，免得 z.coerce.boolean() 把 undefined
+// 当 false（实际上 z.coerce.boolean(undefined)=false 倒也 ok）；这里更稳妥的写法
+// 是显式列明几种"开"的字面值。
+const requireGradingSchema = z.preprocess((v) => {
+  if (typeof v === "boolean") return v;
+  if (v === undefined || v === null) return true; // 默认打分
+  const s = String(v).toLowerCase();
+  return s === "on" || s === "true" || s === "1" || s === "yes";
+}, z.boolean());
+
+const questionCreate = z
+  .object({
+    batchId: z.string().min(1),
+    index: z.coerce.number().int().min(1).max(99),
+    prompt: z.string().min(1).max(4000),
+    requireGrading: requireGradingSchema,
+    rubric: optionalText(4000),
+    feedbackGuide: optionalText(4000),
+    customGradingPrompt: optionalText(16000),
+    customSingleShotPrompt: optionalText(16000),
+  })
+  .superRefine((val, ctx) => {
+    if (val.requireGrading && val.rubric.trim() === "") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["rubric"],
+        message: "需要打分时，给分细则不能为空",
+      });
+    }
+  });
 
 export async function upsertQuestionAction(
   _prev: { error?: string; ok?: true } | undefined,
@@ -81,6 +104,7 @@ export async function upsertQuestionAction(
     batchId: formData.get("batchId"),
     index: formData.get("index"),
     prompt: formData.get("prompt"),
+    requireGrading: formData.get("requireGrading"),
     rubric: formData.get("rubric"),
     feedbackGuide: formData.get("feedbackGuide"),
     customGradingPrompt: formData.get("customGradingPrompt"),
@@ -92,6 +116,7 @@ export async function upsertQuestionAction(
 
   const data = {
     prompt: parsed.data.prompt.trim(),
+    requireGrading: parsed.data.requireGrading,
     rubric: parsed.data.rubric.trim() || null,
     feedbackGuide: parsed.data.feedbackGuide.trim() || null,
     customGradingPrompt: parsed.data.customGradingPrompt.trim() || null,

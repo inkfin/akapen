@@ -19,7 +19,12 @@ import type { CellState } from "@/lib/grade-data";
 type Props = {
   batchId: string;
   student: { id: string; externalId: string; name: string };
-  question: { id: string; index: number; prompt: string };
+  question: {
+    id: string;
+    index: number;
+    prompt: string;
+    requireGrading: boolean;
+  };
   cell: CellState;
   onClose: () => void;
 };
@@ -151,7 +156,11 @@ export function CellDetailSheet({
               <Badge variant="outline">第 {cell.latest.revision} 次</Badge>
             ) : null}
             {cell.latest?.status === "succeeded" && !hasScore ? (
-              <Badge variant="info">只批注</Badge>
+              question.requireGrading ? (
+                <Badge variant="destructive">应打未打</Badge>
+              ) : (
+                <Badge variant="info">只批注</Badge>
+              )
             ) : null}
           </div>
           {hasScore ? (

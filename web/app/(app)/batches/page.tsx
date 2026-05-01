@@ -91,14 +91,17 @@ export default async function BatchesPage({
                 <CardTitle className="line-clamp-1">{b.title}</CardTitle>
                 <CardDescription>{b.class.name}</CardDescription>
               </CardHeader>
-              <CardContent className="flex items-center justify-between gap-2">
+              <CardContent className="space-y-2">
                 <Badge variant="secondary">{b._count.questions} 题</Badge>
-                <div className="flex gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <Button asChild variant="outline" size="sm">
-                    <Link href={`/batches/${b.id}`}>编辑题目</Link>
+                    <Link href={`/batches/${b.id}`}>编辑</Link>
                   </Button>
                   <Button asChild size="sm">
                     <Link href={`/grade/${b.id}`}>批改</Link>
+                  </Button>
+                  <Button asChild variant="secondary" size="sm">
+                    <Link href={`/results/${b.id}`}>成绩</Link>
                   </Button>
                 </div>
               </CardContent>

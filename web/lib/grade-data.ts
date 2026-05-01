@@ -43,6 +43,13 @@ export type GradeBoardData = {
     id: string;
     index: number;
     prompt: string;
+    /**
+     * 显式打分意图。透到前端是因为 cell 的"finalScore=null"语义有歧义：
+     *   - requireGrading=true + finalScore=null → 应打分但 LLM 没给出（异常，应红色提示）
+     *   - requireGrading=false + finalScore=null → 题本身不打分（正常，灰色"已批注"）
+     * UI 拿到这两种 case 应该呈现得完全不一样，不能一刀切。
+     */
+    requireGrading: boolean;
   }[];
   cells: Record<string, Record<string, CellState>>;
 };
@@ -125,6 +132,7 @@ export async function loadGradeBoard(
       id: q.id,
       index: q.index,
       prompt: q.prompt,
+      requireGrading: q.requireGrading,
     })),
     cells,
   };

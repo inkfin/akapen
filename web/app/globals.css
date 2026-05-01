@@ -85,3 +85,34 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
+
+/*
+ * 打印样式（成绩单页 window.print() 用）。
+ * - 强制亮色：避免 dark 主题下打印出黑底白字（浪费墨水）
+ * - 隐藏 layout 的侧边栏 / 移动顶栏 / 任何带 print:hidden 的元素
+ * - main 去掉 padding，让卡片占满整页宽
+ * - 卡片避免被纸张分页切开（page-break-inside: avoid）
+ */
+@media print {
+  :root,
+  .dark {
+    --background: #fff;
+    --foreground: #000;
+    --card: #fff;
+    --card-foreground: #000;
+    --muted: #fff;
+    --muted-foreground: #555;
+    --border: #ccc;
+  }
+  aside,
+  header.md\:hidden {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+  article {
+    page-break-inside: avoid;
+  }
+}

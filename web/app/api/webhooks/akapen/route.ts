@@ -28,6 +28,12 @@ export const dynamic = "force-dynamic";
 
 // payload schema：与 backend/schemas.WebhookPayload 对齐，但用宽松校验，
 // 未来 backend 给 payload 加新字段不会让我们 400。
+//
+// 关键：backend GradingResult 把 final_score / max_score 声明为 `float | None`，
+// "不打分"模式（requireGrading=false）下走 None → pydantic 序列化成 `null` 进 JSON。
+// 之前用 `z.number().optional()` 不接受 null，会让 webhook 整体 400 → backend
+// 5 次退避重试后死信，UI 永远停在 pending。改用 `nullish()` 同时接受 number / null /
+// undefined，并显式列出 max_score（之前靠 .passthrough() 兜着没有强校验）。
 const payloadSchema = z.object({
   task_id: z.string().min(1),
   status: z.enum([
@@ -44,8 +50,9 @@ const payloadSchema = z.object({
   student_name: z.string(),
   result: z
     .object({
-      final_score: z.number().optional(),
-      review_flag: z.boolean().optional(),
+      final_score: z.number().nullish(),
+      max_score: z.number().nullish(),
+      review_flag: z.boolean().nullish(),
     })
     .passthrough()
     .optional()
