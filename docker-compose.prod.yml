@@ -1,0 +1,34 @@
+# 生产环境 override：在 ECS 上拉 ACR 远端镜像跑，**不再本地 build**。
+#
+# 用法（在 ECS 上）：
+#   1) 一次性登录阿里云 ACR：
+#        docker login crpi-4noctswoyij0f9rg.cn-shenzhen.personal.cr.aliyuncs.com -u inkfinite
+#   2) 准备 .env / web/.env / data 目录（首次部署时跟 README 模式 C 走）。
+#   3) 起服：
+#        docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+#        docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# 想直接用 docker-compose.yml 的本地 build 路径开发就**不要**带 -f docker-compose.prod.yml。
+# 也就是：本地开发 `docker compose up -d`，生产部署 `docker compose -f ... -f docker-compose.prod.yml ...`。
+#
+# 想把日常命令缩短？ECS 上写到 ~/.bashrc：
+#   alias dcp='docker compose -f docker-compose.yml -f docker-compose.prod.yml'
+# 之后 `dcp pull && dcp up -d` 就行。
+#
+# tag 升级 / 回滚：
+#   - 默认这里写 :latest，配 `pull_policy: always`，每次 `up -d` 都拉最新。
+#   - 想钉死某个 git sha：把下面的 :latest 改成 :44cbf5a（push-acr.sh 已经把 git short sha
+#     也打成 tag），或在 ECS 上 `export ACR_TAG=44cbf5a`，然后改成 :${ACR_TAG:-latest}。
+
+services:
+  backend:
+    image: crpi-4noctswoyij0f9rg.cn-shenzhen.personal.cr.aliyuncs.com/inkfin/akapen-backend:latest
+    pull_policy: always
+    # 远端拉的镜像 build args 已经定型，不再需要 USER_UID/USER_GID。
+    # build: 段在 docker-compose.yml 还在，但 docker compose 优先用 image，不会
+    # 重新 build；唯一要避免的是手动跑 `docker compose build`。
+    # 如果 host uid != 1000 想 chown：先 sudo chown -R 1000:1000 data/ 一次。
+
+  web:
+    image: crpi-4noctswoyij0f9rg.cn-shenzhen.personal.cr.aliyuncs.com/inkfin/akapen-web:latest
+    pull_policy: always
