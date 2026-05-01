@@ -57,11 +57,24 @@ export type CreateTaskInput = {
    * 所以本字段在 backend ext 合并前 *不能* 传）。akapen-backend-ext 完成后再启用。
    */
   questionContext?: string;
+  /**
+   * 覆盖 backend Settings 默认值。**所有字段都是 optional**，不传 = 用 backend 的默认。
+   * 字段名与 backend/schemas.py:ProviderOverrides 一一对应（snake_case 转换在序列化层做）。
+   *
+   * web 端从 WebSettings 读出来后会把全套字段传过来，这样 backend 不再依赖
+   * data/settings.json，真正成为"无状态"批改服务。
+   */
   providerOverrides?: {
     provider?: string;
     model?: string;
+    ocrProvider?: string;
+    ocrModel?: string;
     enableSingleShot?: boolean;
     gradingWithImage?: boolean;
+    gradingThinking?: boolean;
+    ocrPrompt?: string;
+    gradingPrompt?: string;
+    singleShotPrompt?: string;
   };
 };
 
@@ -234,16 +247,24 @@ export async function createGradingTask(
   if (input.questionContext) body.question_context = input.questionContext;
   if (input.providerOverrides) {
     const po = input.providerOverrides;
-    body.provider_overrides = {
-      ...(po.provider !== undefined ? { provider: po.provider } : {}),
-      ...(po.model !== undefined ? { model: po.model } : {}),
-      ...(po.enableSingleShot !== undefined
-        ? { enable_single_shot: po.enableSingleShot }
-        : {}),
-      ...(po.gradingWithImage !== undefined
-        ? { grading_with_image: po.gradingWithImage }
-        : {}),
-    };
+    const dict: Record<string, unknown> = {};
+    if (po.provider !== undefined) dict.provider = po.provider;
+    if (po.model !== undefined) dict.model = po.model;
+    if (po.ocrProvider !== undefined) dict.ocr_provider = po.ocrProvider;
+    if (po.ocrModel !== undefined) dict.ocr_model = po.ocrModel;
+    if (po.enableSingleShot !== undefined)
+      dict.enable_single_shot = po.enableSingleShot;
+    if (po.gradingWithImage !== undefined)
+      dict.grading_with_image = po.gradingWithImage;
+    if (po.gradingThinking !== undefined)
+      dict.grading_thinking = po.gradingThinking;
+    if (po.ocrPrompt !== undefined && po.ocrPrompt.length > 0)
+      dict.ocr_prompt = po.ocrPrompt;
+    if (po.gradingPrompt !== undefined && po.gradingPrompt.length > 0)
+      dict.grading_prompt = po.gradingPrompt;
+    if (po.singleShotPrompt !== undefined && po.singleShotPrompt.length > 0)
+      dict.single_shot_prompt = po.singleShotPrompt;
+    if (Object.keys(dict).length > 0) body.provider_overrides = dict;
   }
 
   const res = await fetchWithRetry("/v1/grading-tasks", {

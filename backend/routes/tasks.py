@@ -129,6 +129,7 @@ async def _create_from_json(request: Request, api_key_id: str) -> TaskCreateResp
     provider_override, model_override, mode_override = _resolve_overrides(
         req.provider_overrides, settings,
     )
+    overrides_dict = _serialize_overrides(req.provider_overrides)
 
     inp = CreateTaskInput(
         api_key_id=api_key_id,
@@ -144,6 +145,7 @@ async def _create_from_json(request: Request, api_key_id: str) -> TaskCreateResp
         model=model_override,
         mode=mode_override,
         question_context=req.question_context,
+        overrides=overrides_dict,
     )
     task_id, idempotent = await create_task(state.db, inp)
     if not idempotent:
@@ -229,6 +231,7 @@ async def _create_from_multipart(request: Request, api_key_id: str) -> TaskCreat
         # 解析 provider_overrides JSON（如果有）
         po_raw = form.get("provider_overrides")
         provider_override = model_override = mode_override = None
+        overrides_dict: dict | None = None
         if po_raw:
             try:
                 from ..schemas import ProviderOverrides
@@ -236,6 +239,7 @@ async def _create_from_multipart(request: Request, api_key_id: str) -> TaskCreat
                 provider_override, model_override, mode_override = _resolve_overrides(
                     po, settings,
                 )
+                overrides_dict = _serialize_overrides(po)
             except Exception as e:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -257,6 +261,7 @@ async def _create_from_multipart(request: Request, api_key_id: str) -> TaskCreat
             model=model_override,
             mode=mode_override,
             question_context=question_context_raw,
+            overrides=overrides_dict,
         )
         task_id, idempotent = await create_task(state.db, inp)
 
@@ -321,6 +326,7 @@ def _resolve_overrides(po, settings) -> tuple[str | None, str | None, str | None
     """:class:`ProviderOverrides` → (provider, model, mode)；不传任何字段返回 (None, None, None)。
 
     一路上做合法性校验（拒绝未知 provider、空字符串等）。
+    只解析"用于查询/索引"的三个字段，prompts/thinking 等长字段走 _serialize_overrides。
     """
     if po is None:
         return (None, None, None)
@@ -332,6 +338,14 @@ def _resolve_overrides(po, settings) -> tuple[str | None, str | None, str | None
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"未知 provider {provider!r}（已注册: {registered_providers()})",
+        )
+
+    # OCR provider 也要校验
+    ocr_provider = po.ocr_provider.strip() if po.ocr_provider else None
+    if ocr_provider and ocr_provider not in registered_providers():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"未知 ocr_provider {ocr_provider!r}（已注册: {registered_providers()})",
         )
 
     model = po.model.strip() if po.model else None
@@ -346,6 +360,20 @@ def _resolve_overrides(po, settings) -> tuple[str | None, str | None, str | None
             mode = "two_step_text"
 
     return (provider, model, mode)
+
+
+def _serialize_overrides(po) -> dict | None:
+    """:class:`ProviderOverrides` → 完整 dict（含 prompts / thinking / ocr_*），
+    供 worker 侧使用。所有 None 字段会被 model_dump(exclude_none=True) 过滤掉，
+    所以 worker 拿 dict.get(key) 时只对显式传过来的字段返回非 None。
+
+    返回 None 表示用户根本没传 provider_overrides 字段；返回空 dict 表示传了但
+    所有字段都是 None（视同没传）。
+    """
+    if po is None:
+        return None
+    d = po.model_dump(exclude_none=True)
+    return d if d else None
 
 
 def _make_create_response(task_id: str, idempotent: bool, request: Request) -> TaskCreateResponse:

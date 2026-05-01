@@ -26,8 +26,9 @@ model User {
   role         String   @default("teacher") // 留 enum 余地：teacher / admin
   createdAt    DateTime @default(now())
 
-  classes Class[]
-  batches HomeworkBatch[]
+  classes  Class[]
+  batches  HomeworkBatch[]
+  settings WebSettings?
 }
 
 model Class {
@@ -103,6 +104,41 @@ model Submission {
   @@unique([questionId, studentId])
   @@index([questionId])
   @@index([studentId])
+}
+
+/// 老师端持久化的批改 / 转写配置。
+///
+/// 设计：每个 User 一行（owner = 老师本人），不和 Class / Batch 绑定 ——
+/// 同一老师在不同班级 / 批次里大概率想用同一份模型 + prompt。需要按批次微调时，
+/// 后续可以加 Question.gradingOverrideJson 单独 override 单题。
+///
+/// **不要**把 API key 存在这里：DashScope key 留给 backend 的 .env，
+/// web 永远只通过 ProviderOverrides 把"模型 + prompt + 行为开关"递过去，
+/// backend 自己用配好的 key 调 LLM。
+model WebSettings {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // 批改主路径
+  gradingProvider   String  @default("qwen")
+  gradingModel      String  @default("qwen3-vl-plus")
+  enableSingleShot  Boolean @default(true)
+  gradingWithImage  Boolean @default(true)
+  gradingThinking   Boolean @default(false)
+
+  // OCR 路径（two-step 模式才用得到）
+  ocrProvider String @default("qwen")
+  ocrModel    String @default("qwen3-vl-plus")
+
+  // Prompts —— 留 NULL 意味"用 backend 默认"，这样老师不填的字段会 fallback
+  // 到 prompts/*.md。前端上限 16K（与 backend ProviderOverrides 一致）。
+  ocrPrompt        String?
+  gradingPrompt    String?
+  singleShotPrompt String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model GradingTask {

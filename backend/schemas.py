@@ -37,15 +37,31 @@ CANCELLABLE_STATUSES: frozenset[str] = frozenset({
 
 
 class ProviderOverrides(BaseModel):
-    """允许前端为某条任务临时覆盖 provider / model（高级用法，可选）。
+    """允许前端为某条任务临时覆盖 provider / model / prompts 等。
 
-    未传则用 ``Settings`` 里的默认值。后端会校验覆盖值是否合法，不合法直接 422。
+    凡 ``None`` 字段 = 用 backend ``Settings`` 里的默认值（向下兼容旧客户端）。
+    凡非 None 字段 = 该任务这一次跑用提供的值，**不持久化**到 settings.json。
+
+    设计动机（2026-05 加入 prompts/thinking 后扩写）：
+
+    - akapen-backend 之前默认从 ``data/settings.json`` 读 prompts / model，
+      意味着批改任务全局共享这一份配置。这跟 ``web/`` 老师端「设置应该是前端
+      自治」的边界冲突 —— web 现在通过这个 schema 把自己存的 WebSettings
+      原样递过来，backend 不再读自己的全局 settings 来跑 web 的任务。
+    - demo Gradio (mode A) 仍然走 settings.json 的默认，互不影响。
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: str | None = Field(default=None, description="qwen / gemini / claude")
-    model: str | None = Field(default=None, description="模型 id")
+    # ---- provider / model ---- #
+    provider: str | None = Field(default=None, description="批改 provider：qwen / gemini / claude")
+    model: str | None = Field(default=None, description="批改模型 id")
+    ocr_provider: str | None = Field(
+        default=None, description="OCR provider；与 provider 独立。两步模式下用",
+    )
+    ocr_model: str | None = Field(default=None, description="OCR 模型 id")
+
+    # ---- 模式开关 ---- #
     enable_single_shot: bool | None = Field(
         default=None,
         description="该任务是否走 single-shot；None = 用 settings 默认",
@@ -54,6 +70,16 @@ class ProviderOverrides(BaseModel):
         default=None,
         description="两步模式下批改阶段是否再发图；None = 用 settings 默认",
     )
+    grading_thinking: bool | None = Field(
+        default=None,
+        description="批改阶段是否启用思考模式（部分模型如 qwen3-vl-thinking 支持）",
+    )
+
+    # ---- prompts ---- #
+    # 全部上限 16K 字符，给老师足够空间写复杂的评分细则但又不至于撑爆 token / SQLite。
+    ocr_prompt: Annotated[str, Field(max_length=16000)] | None = None
+    grading_prompt: Annotated[str, Field(max_length=16000)] | None = None
+    single_shot_prompt: Annotated[str, Field(max_length=16000)] | None = None
 
 
 class TaskCreateRequestJSON(BaseModel):

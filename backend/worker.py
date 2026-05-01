@@ -174,17 +174,29 @@ class Worker:
         await transition_status(self.state.db, tid, "preprocessing")
 
         # 2. 选模式
+        # overrides 优先级：run_data.overrides[k] 显式存在 → settings.core.k 默认 → fallback
+        # （web 端老师的 WebSettings 走 overrides 通道；demo Gradio 走 settings.core）
         s = self.state.settings.core
-        provider_name = run_data.provider_override or s.grading_provider
-        model = run_data.model_override or s.grading_model
+        ov = run_data.overrides or {}
+        provider_name = run_data.provider_override or ov.get("provider") or s.grading_provider
+        model = run_data.model_override or ov.get("model") or s.grading_model
         provider = self._get_provider(provider_name)
 
         is_vision = provider.is_vision_model(model)
+        # mode 决定：run_data.mode_override（来自 _resolve_overrides）已优先；
+        # 否则按 overrides 的 enable_single_shot / grading_with_image 推；
+        # 都没传时退到全局 Settings。
+        enable_single_shot = ov.get("enable_single_shot")
+        if enable_single_shot is None:
+            enable_single_shot = s.enable_single_shot
+        grading_with_image = ov.get("grading_with_image")
+        if grading_with_image is None:
+            grading_with_image = s.grading_with_image
         if run_data.mode_override:
             mode = run_data.mode_override
-        elif s.enable_single_shot and is_vision:
+        elif enable_single_shot and is_vision:
             mode = "single_shot"
-        elif s.grading_with_image and is_vision:
+        elif grading_with_image and is_vision:
             mode = "two_step_vision"
         else:
             mode = "two_step_text"
@@ -317,10 +329,15 @@ class Worker:
         await self._reserve_bandwidth(total_bytes)
 
         s = self.state.settings.core
+        ov = run_data.overrides or {}
         kind = "single_shot"
-        prompt = s.single_shot_prompt
+        # prompt / thinking 优先用 overrides
+        prompt = ov.get("single_shot_prompt") or s.single_shot_prompt
         if not prompt.strip():
             raise GradingError("single_shot_prompt 为空（检查 prompts/single_shot.md）")
+        thinking = ov.get("grading_thinking")
+        if thinking is None:
+            thinking = s.grading_thinking
 
         t0 = time.monotonic()
         try:
@@ -333,7 +350,7 @@ class Worker:
                 provider=provider,
                 model=model,
                 prompt_template=prompt,
-                thinking=s.grading_thinking,
+                thinking=thinking,
                 timeout_sec=s.grading_timeout_sec,
                 max_attempts=max(2, s.max_attempts),
                 question_context=run_data.question_context,
@@ -363,10 +380,12 @@ class Worker:
     ) -> tuple[str, "object"]:
         """两步：OCR（vision）→ 批改（text 或 vision）。"""
         s = self.state.settings.core
+        ov = run_data.overrides or {}
 
-        # OCR 用 OCR provider/model（与批改无关），始终带图
-        ocr_provider_name = s.ocr_provider
-        ocr_model = s.ocr_model
+        # OCR 用独立的 ocr_provider / ocr_model（与批改的 provider/model 解耦）
+        ocr_provider_name = ov.get("ocr_provider") or s.ocr_provider
+        ocr_model = ov.get("ocr_model") or s.ocr_model
+        ocr_prompt = ov.get("ocr_prompt") or s.ocr_prompt
         ocr_provider = self._get_provider(ocr_provider_name)
 
         await transition_status(self.state.db, run_data.task_id, "ocr_running")
@@ -380,7 +399,7 @@ class Worker:
                 image_bytes=image_bytes_list,
                 provider=ocr_provider,
                 model=ocr_model,
-                prompt=s.ocr_prompt,
+                prompt=ocr_prompt,
                 timeout_sec=s.ocr_timeout_sec,
                 max_attempts=max(2, s.max_attempts),
                 label=f"{run_data.student_name}({run_data.student_id})",
@@ -416,6 +435,12 @@ class Worker:
             grading_bytes = []
             grading_total = 0
 
+        # grading prompt / thinking 也走 overrides 优先
+        grading_prompt = ov.get("grading_prompt") or s.grading_prompt
+        thinking = ov.get("grading_thinking")
+        if thinking is None:
+            thinking = s.grading_thinking
+
         t1 = time.monotonic()
         try:
             grading = await asyncio.to_thread(
@@ -425,10 +450,10 @@ class Worker:
                 student_name=run_data.student_name,
                 provider=grading_provider,
                 model=model,
-                prompt_template=s.grading_prompt,
+                prompt_template=grading_prompt,
                 image_paths=None,
                 image_bytes=grading_bytes if grading_with_image else None,
-                thinking=s.grading_thinking,
+                thinking=thinking,
                 timeout_sec=s.grading_timeout_sec,
                 max_attempts=max(2, s.max_attempts),
                 question_context=run_data.question_context,

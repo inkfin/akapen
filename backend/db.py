@@ -20,7 +20,7 @@ import aiosqlite
 logger = logging.getLogger("backend.db")
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 # ---- 表定义 ---- #
@@ -171,6 +171,14 @@ class Database:
             )
             logger.info("Applied schema migration v2")
 
+        if 3 not in applied:
+            await self._apply_v3()
+            await self._conn.execute(
+                "INSERT INTO schema_versions(version, applied_at) "
+                "VALUES (3, datetime('now'))"
+            )
+            logger.info("Applied schema migration v3")
+
     async def _apply_v1(self) -> None:
         await self._conn.execute(CREATE_TASKS_SQL)
         for sql in CREATE_INDEXES_SQL:
@@ -185,6 +193,19 @@ class Database:
         """
         await self._conn.execute(
             "ALTER TABLE grading_tasks ADD COLUMN question_context TEXT"
+        )
+
+    async def _apply_v3(self) -> None:
+        """加 overrides_json 列。给 web 老师端「前端自治」用 —— web 把自己存的
+        prompts / thinking / ocr_provider / etc 通过 ProviderOverrides 全部
+        递过来，worker 跑这条任务时优先用 overrides，未传字段才退到 Settings。
+
+        v2 的 provider/model/mode 三列独立放，是因为入库时已经做过 _resolve_overrides
+        归一化、worker 直接读单字段方便。这次新增的 prompt 字段太长（最多 16K）、
+        语义也更"批量"，统一塞 JSON blob 更合适，避免给表加 4-5 列文本。
+        """
+        await self._conn.execute(
+            "ALTER TABLE grading_tasks ADD COLUMN overrides_json TEXT"
         )
 
 

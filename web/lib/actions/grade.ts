@@ -10,8 +10,34 @@ import {
   createGradingTask,
   makeIdempotencyKey,
   retryTask as akapenRetryTask,
+  type CreateTaskInput as AkapenCreateTaskInput,
 } from "@/lib/akapen";
 import { buildSignedImageUrl } from "@/lib/hmac";
+import { getWebSettings } from "@/lib/actions/settings";
+
+/**
+ * 把用户的 WebSettings 转成 akapen ProviderOverrides。
+ * 所有字段都传 ——「前端配置 / 后端只服务」边界要求 backend 不再读自己的
+ * data/settings.json 来跑 web 的任务。
+ */
+async function buildProviderOverrides(): Promise<
+  AkapenCreateTaskInput["providerOverrides"]
+> {
+  const s = await getWebSettings();
+  return {
+    provider: s.gradingProvider,
+    model: s.gradingModel,
+    ocrProvider: s.ocrProvider,
+    ocrModel: s.ocrModel,
+    enableSingleShot: s.enableSingleShot,
+    gradingWithImage: s.gradingWithImage,
+    gradingThinking: s.gradingThinking,
+    // prompt 留空 = WebSettings 字段为 NULL，backend 退回 prompts/*.md 默认；非空才传
+    ocrPrompt: s.ocrPrompt || undefined,
+    gradingPrompt: s.gradingPrompt || undefined,
+    singleShotPrompt: s.singleShotPrompt || undefined,
+  };
+}
 
 async function requireUserId() {
   const session = await auth();
@@ -55,6 +81,9 @@ export async function gradeSubmissionsAction(
 ): Promise<{ ok: number; failed: number; errors: string[] }> {
   const userId = await requireUserId();
   const result = { ok: 0, failed: 0, errors: [] as string[] };
+
+  // 老师的设置（model / prompts / 行为开关），整批共用
+  const providerOverrides = await buildProviderOverrides();
 
   // 一次性把 submission + 关联实体取出来，避免 N+1
   const submissions = await prisma.submission.findMany({
@@ -111,6 +140,7 @@ export async function gradeSubmissionsAction(
         callbackUrl: getCallbackUrl(),
         rubricId: sub.question.id,
         questionContext: options?.questionContextOverride ?? ctx,
+        providerOverrides,
       });
 
       await prisma.gradingTask.update({

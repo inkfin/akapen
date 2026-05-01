@@ -57,6 +57,9 @@ class CreateTaskInput:
     mode: str | None = None             # 'single_shot' / 'two_step_text' / 'two_step_vision'
     # 题目上下文（题干 + 可选参考答案），由 grader 拼到 prompt 顶部
     question_context: str | None = None
+    # v3：前端递过来的整套 override（prompts / thinking / ocr_provider 等）。
+    # 不传 = 沿用 backend Settings；传了 worker 跑任务时优先用这里。
+    overrides: dict | None = None
 
 
 # ---- helpers ---- #
@@ -150,6 +153,10 @@ async def create_task(db: Database, inp: CreateTaskInput) -> tuple[str, bool]:
         if row is not None:
             return row["task_id"], True
 
+    overrides_json = (
+        json.dumps(inp.overrides, ensure_ascii=False) if inp.overrides else None
+    )
+
     await db.conn.execute(
         """
         INSERT OR IGNORE INTO grading_tasks (
@@ -161,6 +168,7 @@ async def create_task(db: Database, inp: CreateTaskInput) -> tuple[str, bool]:
             callback_url, rubric_id, rubric_version,
             provider, model, mode,
             question_context,
+            overrides_json,
             attempts, upload_bytes,
             created_at, updated_at
         ) VALUES (
@@ -171,6 +179,7 @@ async def create_task(db: Database, inp: CreateTaskInput) -> tuple[str, bool]:
             0, 0,
             ?, ?, ?,
             ?, ?, ?,
+            ?,
             ?,
             0, 0,
             ?, ?
@@ -184,6 +193,7 @@ async def create_task(db: Database, inp: CreateTaskInput) -> tuple[str, bool]:
             inp.callback_url, inp.rubric_id, inp.rubric_version,
             inp.provider, inp.model, inp.mode,
             inp.question_context,
+            overrides_json,
             now, now,
         ),
     )
@@ -518,6 +528,8 @@ class TaskRunData:
     attempts: int
     status: str
     question_context: str | None = None
+    # v3：前端递来的 overrides（prompts / thinking / ocr_*）；worker 优先用，没传退到 Settings
+    overrides: dict | None = None
 
 
 async def get_task_run_data(db: Database, task_id: str) -> TaskRunData | None:
@@ -528,6 +540,18 @@ async def get_task_run_data(db: Database, task_id: str) -> TaskRunData | None:
     await cur.close()
     if row is None:
         return None
+    overrides_raw = row["overrides_json"]
+    overrides: dict | None = None
+    if overrides_raw:
+        try:
+            overrides = json.loads(overrides_raw)
+            if not isinstance(overrides, dict):
+                overrides = None
+        except json.JSONDecodeError:
+            logger.warning(
+                f"task {row['task_id']} overrides_json 不是合法 JSON，按 None 处理"
+            )
+            overrides = None
     return TaskRunData(
         task_id=row["task_id"],
         api_key_id=row["api_key_id"],
@@ -545,4 +569,5 @@ async def get_task_run_data(db: Database, task_id: str) -> TaskRunData | None:
         status=row["status"],
         # v2 起加了这列；ALTER ADD COLUMN 后老行该列是 NULL，取出来就是 None
         question_context=row["question_context"],
+        overrides=overrides,
     )
