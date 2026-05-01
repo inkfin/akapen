@@ -1,0 +1,136 @@
+// 老师端业务库。SQLite 单文件 / WAL 与 akapen-backend 的 grading.db 相同思路；
+// 通过 docker volume `./web/data:/app/data` 持久化。
+//
+// 业务边界（与 akapen-backend 完全解耦）：
+// - akapen-backend 只看 GradingTask 那一维度（task_id + result + status），
+//   不关心 Class/Student/Question 等业务实体。
+// - 我们这里也不存 OCR / 评分中间产物——akapen webhook 回来后直接落 GradingResult JSON。
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+  // ↑ alpine 容器跑 prisma 用得到 musl binary
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("teacher") // 留 enum 余地：teacher / admin
+  createdAt    DateTime @default(now())
+
+  classes Class[]
+  batches HomeworkBatch[]
+}
+
+model Class {
+  id        String          @id @default(cuid())
+  name      String
+  school    String?
+  ownerId   String
+  owner     User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  students  Student[]
+  batches   HomeworkBatch[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([ownerId])
+}
+
+model Student {
+  id          String       @id @default(cuid())
+  classId     String
+  externalId  String        // 学号
+  name        String
+  class       Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+  createdAt   DateTime     @default(now())
+
+  @@unique([classId, externalId])
+  @@index([classId])
+}
+
+model HomeworkBatch {
+  id        String     @id @default(cuid())
+  classId   String
+  ownerId   String
+  title     String     // "9月第一次作文"
+  notes     String?    // 给批改者的整体说明
+  dueDate   DateTime?
+  class     Class      @relation(fields: [classId], references: [id], onDelete: Cascade)
+  owner     User       @relation(fields: [ownerId], references: [id])
+  questions Question[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([classId])
+  @@index([ownerId])
+}
+
+model Question {
+  id          String       @id @default(cuid())
+  batchId     String
+  index       Int           // 第几题，UI 排序 + 学生上传时选择
+  prompt      String        // 题干，会作为 question_context 送 akapen
+  rubric      String?       // 评分要点 / 标准答案，可选
+  maxScore    Float        @default(100)
+  batch       HomeworkBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+  createdAt   DateTime     @default(now())
+
+  @@unique([batchId, index])
+  @@index([batchId])
+}
+
+model Submission {
+  id         String        @id @default(cuid())
+  questionId String
+  studentId  String
+  imagePaths String        // JSON array，相对 web/data/uploads/
+  question   Question      @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  student    Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  gradings   GradingTask[]
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@unique([questionId, studentId])
+  @@index([questionId])
+  @@index([studentId])
+}
+
+model GradingTask {
+  id             String     @id @default(cuid())
+  submissionId   String
+  // akapen 那边的 task_id（POST /v1/grading-tasks 返回）；网络断开时可能为 null
+  akapenTaskId   String?    @unique
+  // 我们生成的幂等键：submissionId + ":r" + revision
+  // 同一份 Submission 多次重批就 revision++，老 GradingTask 留作历史
+  idempotencyKey String     @unique
+  revision       Int        @default(1)
+  // 状态机：
+  // pending   -- 已创建但还没成功 POST 给 akapen
+  // queued    -- 已 POST，akapen 给了 task_id
+  // running   -- 中台 worker 正在跑（轮询时映射 fetching/preprocessing/ocr/grading）
+  // succeeded -- 中台回调说成功，result 已落库
+  // failed    -- 中台回调说失败，errorCode/Message 已落库
+  status         String     @default("pending")
+  result         String?    // 完整 GradingResult JSON 字符串
+  finalScore     Float?     // 抽出来方便排序 / 筛选
+  reviewFlag     Boolean    @default(false)
+  errorCode      String?
+  errorMessage   String?
+  attempts       Int        @default(0)
+  submission     Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([submissionId])
+  @@index([status])
+  @@index([akapenTaskId])
+}

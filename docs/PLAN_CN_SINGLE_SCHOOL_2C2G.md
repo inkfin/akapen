@@ -185,3 +185,11 @@ data/
 3. 在 `core/storage.py` 增加 `confidence/evidence/review_flag` 字段落盘。
 4. 在 UI 增加 "质量闸门阈值" 与 "复核清单导出"。
 5. 在 `data/exports/` 增加标准化 CSV 导出模板（便于校内系统导入）。
+
+## 16. 题目上下文支持（schema v2，2026-05 加入）
+
+为了让前端（`web/`）能在「按题批改」时把题干 / 评分要点送进来，
+`TaskCreateRequestJSON` / multipart Form 新增可选字段 `question_context`（≤4000 字）。
+`grading_tasks` 表用 `_apply_v2()` 增列；`core.grader._prepend_question_context`
+把 ctx 拼到 prompt 顶部（不改 `prompts/grading.md` / `prompts/single_shot.md`，
+现网部署热升级时无需重置 settings）。老用户不传该字段 → 行为完全等价于 v1。

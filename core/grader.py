@@ -94,6 +94,7 @@ def grade(
     thinking: bool = False,
     timeout_sec: int = 120,
     max_attempts: int = 2,
+    question_context: str | None = None,
 ) -> str:
     """根据 OCR 草稿（+ 可选原图）让模型给出 markdown 批改报告。
 
@@ -109,6 +110,7 @@ def grade(
         prompt_template=prompt_template,
         image_paths=image_paths,
         image_bytes=image_bytes,
+        question_context=question_context,
     )
 
     label = f"{student_name}({student_id})"
@@ -156,6 +158,7 @@ def grade_json(
     thinking: bool = False,
     timeout_sec: int = 120,
     max_attempts: int = 3,
+    question_context: str | None = None,
 ) -> GradingResult:
     """JSON 严格输出版批改：解析失败 / pydantic 校验失败按 ``max_attempts`` 重试。
 
@@ -171,6 +174,7 @@ def grade_json(
         prompt_template=prompt_template,
         image_paths=image_paths,
         image_bytes=image_bytes,
+        question_context=question_context,
     )
 
     label = f"{student_name}({student_id})"
@@ -243,6 +247,7 @@ def single_shot(
     thinking: bool | None = None,
     timeout_sec: int = 180,
     max_attempts: int = 3,
+    question_context: str | None = None,
 ) -> SingleShotResult:
     """一次 vision 调用同时输出 transcription + grading。
 
@@ -265,13 +270,14 @@ def single_shot(
         .replace("{student_name}", student_name)
         .replace("{student_id}", student_id)
     )
+    rendered = _prepend_question_context(rendered, question_context)
     paths_to_send = [Path(p) for p in (image_paths or [])]
     bytes_to_send = list(image_bytes or [])
 
     label = f"{student_name}({student_id})"
     logger.info(
         f"[Single-shot ▶] {label} (provider={provider.name}, model={model}, "
-        f"图={n_img}页, output=json)"
+        f"图={n_img}页, output=json, ctx={'yes' if question_context else 'no'})"
     )
 
     last_err: Exception | None = None
@@ -343,6 +349,7 @@ def _prepare_grade_call(
     prompt_template: str,
     image_paths: Sequence[str | Path] | None,
     image_bytes: Sequence[bytes] | None,
+    question_context: str | None = None,
 ) -> tuple[str, list[Path], list[bytes], str, int]:
     """渲染 prompt + 决定 vision/text 模式，返回 (rendered, paths, bytes, mode, n_img)。"""
     if not transcription.strip():
@@ -359,6 +366,7 @@ def _prepare_grade_call(
         .replace("{student_id}", student_id)
     )
     rendered, sub_kind = _apply_review_block(rendered_template, review_block)
+    rendered = _prepend_question_context(rendered, question_context)
 
     paths_to_send = [Path(p) for p in (image_paths or [])] if is_vision_mode else []
     bytes_to_send = list(image_bytes or []) if is_vision_mode else []
@@ -390,6 +398,28 @@ def _effective_image_count(
     if image_paths:
         return sum(1 for p in image_paths if Path(p).exists())
     return 0
+
+
+def _prepend_question_context(prompt: str, question_context: str | None) -> str:
+    """在 prompt 顶部插入「本题题目」上下文段。
+
+    设计取舍：
+    - 不改 prompts/grading.md 也不改 prompts/single_shot.md，原 prompt 当成"评分细则"
+      整体放下半段；这样老用户 settings.json 里存着的旧 prompt 也能直接用，无需重置。
+    - 上下文为 None / 空白时直接返回原 prompt，老调用方不感知。
+    - 截 4000 字防止恶意大 payload 把 token 撑爆（schemas 那边也会校验，这里是兜底）。
+    """
+    if not question_context or not question_context.strip():
+        return prompt
+    ctx = question_context.strip()
+    if len(ctx) > 4000:
+        ctx = ctx[:4000] + " …(truncated)"
+    return (
+        "本题题目（前端传入）：\n"
+        f"{ctx}\n\n"
+        "--- 以下是统一评分细则 ---\n"
+        f"{prompt}"
+    )
 
 
 def _apply_review_block(prompt: str, block: str) -> tuple[str, str]:

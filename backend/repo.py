@@ -55,6 +55,8 @@ class CreateTaskInput:
     provider: str | None = None
     model: str | None = None
     mode: str | None = None             # 'single_shot' / 'two_step_text' / 'two_step_vision'
+    # 题目上下文（题干 + 可选参考答案），由 grader 拼到 prompt 顶部
+    question_context: str | None = None
 
 
 # ---- helpers ---- #
@@ -158,6 +160,7 @@ async def create_task(db: Database, inp: CreateTaskInput) -> tuple[str, bool]:
             review_flag, callback_attempts,
             callback_url, rubric_id, rubric_version,
             provider, model, mode,
+            question_context,
             attempts, upload_bytes,
             created_at, updated_at
         ) VALUES (
@@ -168,6 +171,7 @@ async def create_task(db: Database, inp: CreateTaskInput) -> tuple[str, bool]:
             0, 0,
             ?, ?, ?,
             ?, ?, ?,
+            ?,
             0, 0,
             ?, ?
         )
@@ -179,6 +183,7 @@ async def create_task(db: Database, inp: CreateTaskInput) -> tuple[str, bool]:
             json.dumps(inp.image_paths, ensure_ascii=False),
             inp.callback_url, inp.rubric_id, inp.rubric_version,
             inp.provider, inp.model, inp.mode,
+            inp.question_context,
             now, now,
         ),
     )
@@ -512,6 +517,7 @@ class TaskRunData:
     rubric_version: str | None
     attempts: int
     status: str
+    question_context: str | None = None
 
 
 async def get_task_run_data(db: Database, task_id: str) -> TaskRunData | None:
@@ -537,4 +543,6 @@ async def get_task_run_data(db: Database, task_id: str) -> TaskRunData | None:
         rubric_version=row["rubric_version"],
         attempts=int(row["attempts"] or 0),
         status=row["status"],
+        # v2 起加了这列；ALTER ADD COLUMN 后老行该列是 NULL，取出来就是 None
+        question_context=row["question_context"],
     )

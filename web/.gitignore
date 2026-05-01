@@ -1,0 +1,26 @@
+# Next.js
+.next/
+out/
+build/
+
+# Node
+node_modules/
+*.log
+npm-debug.log*
+
+# 运行时数据（与 ../data/ 同思路：bind mount 上来的，不进 git）
+data/
+
+# 环境
+.env
+.env.local
+.env.production
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts

@@ -143,6 +143,7 @@ async def _create_from_json(request: Request, api_key_id: str) -> TaskCreateResp
         provider=provider_override,
         model=model_override,
         mode=mode_override,
+        question_context=req.question_context,
     )
     task_id, idempotent = await create_task(state.db, inp)
     if not idempotent:
@@ -178,6 +179,14 @@ async def _create_from_multipart(request: Request, api_key_id: str) -> TaskCreat
     rubric_version = (
         (form.get("rubric_version") or "").strip() or settings.default_rubric_version
     )
+
+    # 题目上下文（multipart 也支持）
+    question_context_raw = (form.get("question_context") or "").strip() or None
+    if question_context_raw and len(question_context_raw) > 4000:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="question_context 长度超过 4000 字",
+        )
 
     # 收 images[]：FastAPI 把 multiple file 字段映射成多个同名 key
     files: list[UploadFile] = []
@@ -247,6 +256,7 @@ async def _create_from_multipart(request: Request, api_key_id: str) -> TaskCreat
             provider=provider_override,
             model=model_override,
             mode=mode_override,
+            question_context=question_context_raw,
         )
         task_id, idempotent = await create_task(state.db, inp)
 

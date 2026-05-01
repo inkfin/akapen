@@ -3,9 +3,10 @@
 > 给后续维护这个仓库的人（不管是真人还是 LLM agent）看的架构指南。
 > 用户可见的功能 / 启动方式见 `README.md`，本文件只讲**怎么改代码**。
 
-## 〇、双入口 + 共享内核
+## 〇、三个入口 + 共享内核 + 一个外挂前端
 
-仓库提供两个相互独立的入口，但共享 `core/` 业务核心：
+仓库 *python* 部分提供两个独立入口，共享 `core/` 业务核心；*JS* 部分提供第三个
+入口（Next.js 老师端），它**不 import core**，只通过 HTTP 调 backend：
 
 ```text
 ┌──────────────────────┐                            ┌──────────────────────┐
@@ -15,25 +16,36 @@
 └──────────┬───────────┘                            │ - asyncio worker     │
            │                                        │ - webhook 回调       │
            │             ┌────────────────┐         │ - /admin 上挂 Gradio │
-           └────────────▶│   core/ (业务) │◀────────┴──────────────────────┘
-                         └────────┬───────┘
-                                  ▼
-                         ┌────────────────┐
-                         │ core/providers │  LLM 适配层
-                         └────────────────┘
+           └────────────▶│   core/ (业务) │◀────────┴──────────┬───────────┘
+                         └────────┬───────┘                    │
+                                  ▼                            │ HTTP
+                         ┌────────────────┐                    │ (web → backend)
+                         │ core/providers │                    │
+                         └────────────────┘                    │
+                                                               │
+                                              ┌────────────────┴───────────┐
+                                              │ web/ (Next.js)             │  模式 C：老师端
+                                              │ - 班级/学生/作业 CRUD      │
+                                              │ - 移动端拍照上传           │
+                                              │ - 批改大盘 (学生×题矩阵)   │
+                                              │ - SQLite (web.db)          │
+                                              └────────────────────────────┘
 ```
 
-**两个模式共用**：所有 prompt、所有 provider、所有 grading schema / 评分规则。
-**只有模式 A 需要的东西**（`filenames.py`、`storage.py`、Gradio 主入口）放在
-`demo/`；**只有模式 B 需要的东西**全部在 `backend/`。两边都**不污染** `core/`。
+**模式 A/B 共用 core**：所有 prompt、所有 provider、所有 grading schema。
+**模式 C 不 import core**：避免双语言运行时纠缠；它只跨 HTTP 调 backend，并复用
+backend 的 `WEBHOOK_SECRET` 做回调验签。
 
 依赖方向（单向）：
 
 - `demo/` ──▶ `core/`（合法）
 - `backend/` ──▶ `core/`（合法）
+- `web/` ──▶ `backend/` 仅通过 HTTP（合法），**不**直接 import `core/` 或 `backend/`
 - `core/` ──▶ `demo/` ❌
 - `core/` ──▶ `backend/` ❌
+- `core/` ──▶ `web/` ❌（语言不通，也不许）
 - `demo/` ↔ `backend/` ❌（两条路径完全独立，绝不互相 import）
+- `backend/` ──▶ `web/`：仅通过 webhook + `image_urls`（合法），不 import
 
 ## 一、核心理念
 
@@ -349,3 +361,101 @@ uv run python scripts/smoke_api.py
 
 跑前先确认 `.env` 里 `API_KEYS=akapen:<32 字符>`，并启动中台
 `uv run python -m backend.app`（或 `docker compose up -d`）。
+
+## 十一、模式 C · `web/` 老师端 Next.js 应用
+
+`web/` 是独立的 JS/TS 子项目（Next.js 15 + Prisma + SQLite + NextAuth v5 +
+shadcn/ui + Tailwind v4），与 python 部分**进程级隔离**，docker-compose 中作为
+service `web` 与 `backend` 并列。
+
+### 11.1 `web/` 的边界
+
+- **只做老师端业务**：班级 / 学生 / 作业批次 / 题目 CRUD + 拍照上传 + 批改大盘 +
+  接 backend 的 task 状态。
+- **不调 LLM**：所有评分都通过 `lib/akapen.ts` 走 `POST /v1/grading-tasks`。
+- **不读 `core/grading.db`**：跟 backend 各自一个 SQLite (`web/data/web.db` 与
+  `data/grading.db`)，互不感知。GradingTask 表只存「我们这边发起的批改请求」状态。
+- **不提供给学生用**：产品决策 A，学生不登录；老师代为录入。
+
+### 11.2 `web/` 与 `backend/` 的集成契约
+
+| 字段 / 路径 | 意义 |
+| --- | --- |
+| `web` env `AKAPEN_BASE_URL` | docker-compose 同机部署：`http://backend:8000`；跨机：公网 URL |
+| `web` env `WEB_PUBLIC_BASE_URL` | docker-compose 同机部署：`http://web:3000`；akapen 容器拉图用 |
+| `web` env `AKAPEN_API_KEY` | 等于 backend `.env` 里 `API_KEYS=akapen:<this>` 的 secret 部分 |
+| `web` env `WEBHOOK_SECRET` | **必须等于 backend 的 `WEBHOOK_SECRET`**（用同一份 HMAC 校验） |
+| `web` env `IMAGE_URL_SECRET` | 仅 web 自家用，给 `/u/<token>.jpg` 签名；backend 不感知 |
+| `POST web→backend body.image_urls` | `http://web:3000/u/<HMAC token>.jpg`，内网 docker 拉图，0 公网 |
+| `POST web→backend body.callback_url` | `http://web:3000/api/webhooks/akapen` |
+| `POST web→backend body.idempotency_key` | `<submissionId>:r<revision>`（见 `lib/akapen.ts:makeIdempotencyKey`） |
+| `POST web→backend body.question_context` | 题干 + 评分要点拼出来的 ≤4000 字字符串（schema v2 引入） |
+| Header `X-Akapen-Signature` | `t=<unix>,v1=<hex>`，`v1 = hmac_sha256(secret, f"{t}.{body}")` |
+
+### 11.3 `web/` 文件地图
+
+| 文件 | 职责 |
+| --- | --- |
+| `web/app/(auth)/login/` | 登录页（NextAuth Credentials + server action） |
+| `web/app/(app)/classes/` | 班级 / 学生 CRUD |
+| `web/app/(app)/batches/` | 作业批次 / 题目 CRUD + 移动端 upload 入口 |
+| `web/app/(app)/grade/[id]/` | 批改大盘（学生 × 题号矩阵 + 多选 + 一键批改 + 详情抽屉） |
+| `web/app/api/upload/` | 多部件接图，落盘 `data/uploads/<batch>/<student>/<q>/<sha>.jpg` |
+| `web/app/api/uploads-preview/` | 给登录的老师本人浏览图片（session 鉴权） |
+| `web/app/api/webhooks/akapen/` | akapen → web 的回调入口（HMAC 验签 + 落库） |
+| `web/app/api/grade/{status,submit,retry}/` | 大盘轮询 + 批改提交 + 重试 HTTP wrapper |
+| `web/app/u/[token]/` | 给 akapen 容器拉图的签名 URL（HMAC 鉴权） |
+| `web/lib/auth.ts` / `auth.config.ts` | NextAuth v5（edge-safe config + 完整 config 分离） |
+| `web/lib/db.ts` | Prisma client singleton（dev 防 hot reload 多实例） |
+| `web/lib/akapen.ts` | akapen HTTP 客户端（创建任务 / 查状态 / 重试 + 退避） |
+| `web/lib/hmac.ts` | 三种 HMAC 用法集中地（图片签名 / webhook 验签 / base64url） |
+| `web/lib/uploads.ts` | 上传配置 + magic-byte 格式检测（拒 HEIC） |
+| `web/lib/grade-data.ts` | 批改大盘数据装载（一次出 cells 矩阵） |
+| `web/lib/actions/{classes,batches,grade}.ts` | server actions：CRUD + 提交批改 |
+| `web/prisma/schema.prisma` | User / Class / Student / HomeworkBatch / Question / Submission / GradingTask |
+| `web/scripts/create-user.ts` | 命令行加老师账号 |
+
+### 11.4 改 `web/` 时的约束
+
+- ❌ **不要 import `core/` 或 `backend/`**：根本 import 不到（不在同一 build 里），
+  即便用 subprocess 调 python 也别这么做 —— 走 HTTP。
+- ❌ **不要在 `web/` 里复制 `prompts/*.md`**：题目上下文通过 `question_context`
+  字段传过去就行，prompt 模板的 ownership 永远在 backend。
+- ❌ **不要把 `WEB_PUBLIC_BASE_URL` 设成公网域名**（除非跨机部署）：会触发 hairpin
+  陷阱，akapen 拉图会回到自己的公网出向，把 3 Mbps 打爆。详见
+  `.cursor/plans/homework-frontend_*.plan.md` §八。
+- ❌ **不要把 GradingTask.result 字段塞进轮询响应**：那是大块 JSON，每 3s 回包
+  会喷大量字节。`lib/grade-data.ts` 已经只回 `finalScore + reviewFlag + status`，
+  保持这样就好；想看完整 JSON 单独走 `/api/grade/result?id=...`（暂时未实现，
+  按需加）。
+- ❌ **不要在 client component 里直接 import server action**：用
+  `/api/grade/submit` 这类 fetch wrapper，给 react-query 一个统一的错误处理路径。
+
+### 11.5 `web/` 烟测
+
+```bash
+cd web
+
+# 1) 装依赖（用 npmmirror 加速，已写在 .npmrc 里）
+npm ci
+
+# 2) 跑数据库迁移到本地 SQLite
+DATABASE_URL=file:./data/web.db npx prisma migrate deploy
+
+# 3) 创建初始账号
+DATABASE_URL=file:./data/web.db npm run create-user -- \
+  --email teacher@example.com --password testtest --name 王老师
+
+# 4) 起 dev server（默认 3000）
+DATABASE_URL=file:./data/web.db \
+AUTH_SECRET=testtesttesttesttesttesttesttest \
+WEBHOOK_SECRET=与-backend-同步 \
+IMAGE_URL_SECRET=testtesttesttesttesttesttesttest \
+AKAPEN_BASE_URL=http://localhost:8000 \
+AKAPEN_API_KEY=akapen-secret-from-.env \
+WEB_PUBLIC_BASE_URL=http://host.docker.internal:3000 \
+npm run dev
+```
+
+跨容器集成测试请用 `docker compose up`，不要在裸进程模式下连 docker network 里的
+backend 服务（除非用 `host.docker.internal` 或加上 host 映射）。

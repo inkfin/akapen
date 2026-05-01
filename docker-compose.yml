@@ -42,9 +42,50 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
-    # 2C2G 服务器留点 buffer：容器最多吃 1.5G 内存，避免 OOM 影响系统进程
+    # 2C2G 服务器留点 buffer：backend 最多吃 1.5G 内存。web 容器再分 512m，
+    # 加 OS 自身留 ~50M，刚好 2G 内能跑两个（详见 docs/PLAN_CN_SINGLE_SCHOOL_2C2G.md §〇 容量预算）。
     mem_limit: 1536m
     memswap_limit: 1536m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 老师端 Web（Next.js + SQLite + NextAuth）
+  # 与 backend 共用 docker network，用 service name 互通：
+  #   web → backend：AKAPEN_BASE_URL=http://backend:8000
+  #   backend → web：WEB_PUBLIC_BASE_URL=http://web:3000  （图片签名 URL / webhook 回调）
+  # 二者全部走 docker bridge 内核转发，*不占公网 3 Mbps 带宽*（关键收益，详见 plan §八）。
+  # ────────────────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: ./web
+    image: akapen-web:latest
+    container_name: akapen-web
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${WEB_HOST_PORT:-3000}:3000"
+    env_file:
+      - ./web/.env
+    environment:
+      # 容器互联用 service 名 —— 千万别填公网域名（hairpin 陷阱），见 docs §八
+      AKAPEN_BASE_URL: http://backend:8000
+      WEB_PUBLIC_BASE_URL: http://web:3000
+      # SQLite 落盘到挂载点
+      DATABASE_URL: file:/app/data/web.db
+      # NextAuth 默认从 X-Forwarded-* 推 cookie domain；docker 内 service 名能解析就行
+      NEXTAUTH_URL: http://localhost:${WEB_HOST_PORT:-3000}
+    volumes:
+      # web.db + uploads/ 全部挂回宿主，容器删了数据不丢
+      - ./web/data:/app/data
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 512m
+    memswap_limit: 512m
     logging:
       driver: json-file
       options:

@@ -75,6 +75,11 @@ class TaskCreateRequestJSON(BaseModel):
     rubric_version: str | None = None
     provider_overrides: ProviderOverrides | None = None
 
+    # 题目上下文：会被 grader 拼到 prompt 顶部（"本题题目（前端传入）：…"）。
+    # 不传或留空时 grader 会跳过拼接，行为与旧版完全一致。
+    # 上限 4000 字防止用户把整篇参考答案塞进来撑爆 token（grader 内部还会再 truncate 一次兜底）。
+    question_context: Annotated[str, Field(max_length=4000)] | None = None
+
 
 # ---- 创建任务响应 ---- #
 

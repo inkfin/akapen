@@ -1,0 +1,33 @@
+# Build artifacts
+.next/
+out/
+node_modules/
+
+# 运行时数据 —— 千万别打进镜像。docker-compose 用 ./web/data:/app/data bind-mount 替代。
+data/
+
+# 环境（让 docker-compose env_file 注入而不是 baking 进 image）
+.env
+.env.local
+.env.production
+.env*.local
+
+# Git / IDE / OS
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+
+# Tests / docs / scripts that don't need to be in image
+*.md
+README.md
+**/*.test.ts
+**/*.spec.ts
+
+# TypeScript build files
+*.tsbuildinfo
+next-env.d.ts
+
+# 显式保留 .npmrc：让 docker build 用 registry.npmmirror.com 加速国内拉包
+!.npmrc

@@ -336,6 +336,7 @@ class Worker:
                 thinking=s.grading_thinking,
                 timeout_sec=s.grading_timeout_sec,
                 max_attempts=max(2, s.max_attempts),
+                question_context=run_data.question_context,
             )
         except (ProviderError, GradingError) as e:
             metrics.provider_errors_total.labels(
@@ -430,6 +431,7 @@ class Worker:
                 thinking=s.grading_thinking,
                 timeout_sec=s.grading_timeout_sec,
                 max_attempts=max(2, s.max_attempts),
+                question_context=run_data.question_context,
             )
         except (ProviderError, GradingError) as e:
             metrics.provider_errors_total.labels(

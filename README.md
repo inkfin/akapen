@@ -1,6 +1,6 @@
 # Akapen
 
-日语作文批改工具，**两种用法**共存：
+日语作文批改工具，**三个入口**共存，用一套 `core/` 业务内核：
 
 - **模式 A · 离线 Gradio（``demo/``）** —— 老牌单机批改：扫描 `data/input/`
   下整班作文目录，UI 上点几下，结果落到 `data/records/`，导出 Markdown。
@@ -8,9 +8,21 @@
   提供 REST API 和 webhook。前端（作业收集系统）通过 ``POST /v1/grading-tasks``
   提交任务，轮询或回调拿严格 JSON 评分结果。访问
   ``http://127.0.0.1:8000/admin`` 还能看到只读运维后台（Gradio）。
+- **模式 C · 老师端 Web（``web/``）** —— Next.js 15 + SQLite + NextAuth 的学生作业
+  管理系统：班级 / 学生 / 作业批次 / 题目 CRUD + 移动端拍照上传 + 「学生 × 题号」批改
+  大盘 + 一键批改 / 重批。本身**不调 LLM**，所有批改请求都通过 HTTP 接 backend 中台。
+  独立 Docker 镜像，与 backend 在同一台机上 docker-compose 跑，二者用 docker network
+  互联，**容器互联流量不占公网 3 Mbps 带宽**（详见 `docs/PLAN_CN_SINGLE_SCHOOL_2C2G.md` §〇）。
 
-两种模式**共享业务核心**（`core/`），换 LLM provider / 改 prompt / 调画质都
-是同一份代码。
+三个入口**共享业务核心**（`core/`）的同时也明确了职责边界：
+
+| 维度 | demo | backend | web |
+| --- | --- | --- | --- |
+| 入口 | `python -m demo.app` (Gradio :7860) | uvicorn (:8000) | next start (:3000) |
+| 数据库 | 文件夹 + JSON | `data/grading.db` | `web/data/web.db` |
+| LLM 调用 | 直接调 core | 直接调 core | **不调，POST 到 backend** |
+| 认证 | 无（局域网） | API Key | 邮箱密码（NextAuth） |
+| 主要使用者 | 单老师本机 | 第三方系统 | 老师从手机/电脑上批改
 
 ## 启动
 
@@ -168,6 +180,51 @@ docker buildx build --platform linux/amd64 -t akapen-backend:latest --load .
 # 然后 docker save | ssh server docker load
 ```
 
+### 模式 C · 老师端 Web (web/)
+
+**完整启动（含 backend）：**
+
+```bash
+# 1) 准备 backend 配置（同模式 B）
+cp .env.example .env
+# 编辑：DASHSCOPE_API_KEY / API_KEYS / WEBHOOK_SECRET（必填）
+
+# 2) 准备 web 配置：
+cp web/.env.example web/.env
+# 编辑 web/.env：AUTH_SECRET / IMAGE_URL_SECRET（各 32+ 字符随机串）
+# 关键：WEBHOOK_SECRET 必须与 .env 里那个一模一样
+# 关键：AKAPEN_API_KEY 是 .env 里 API_KEYS=akapen:<secret> 中的 <secret>
+
+# 3) 起两个服务（backend + web 一起拉）
+docker compose up -d --build
+
+# 4) 创建初始老师账号（学生不登录，老师代为录入）
+docker compose exec web node scripts/create-user.js \
+  --email teacher@example.com --password 'mypassword' --name '王老师'
+# 注意：tsx 不在 production 镜像；docker 路径用编译后的 JS（standalone build 自带）。
+# 如果上面命令找不到 .js 文件，用：
+#   docker compose exec web node ./node_modules/tsx scripts/create-user.ts \
+#     --email ...
+
+# 5) 浏览器打开 http://<host>:3000，邮箱+密码登录
+```
+
+**典型使用流程：**
+
+1. 「班级 / 学生」新建班级 → 批量粘贴学号+姓名（每行一名）
+2. 「作业批次」新建批次 → 添加题目（题干 = `question_context` 送 LLM）
+3. 手机扫码访问 `/batches/<id>/upload` → 选学生 → 逐题拍照
+4. 桌面端进「批改大盘」(`/grade/<id>`) → 多选单元格 → 「一键批改」
+5. 3 秒一次自动刷新；点单元格弹详情抽屉看分数 / 错误 / 重批
+
+**仅启 web（接已有 akapen-backend）：**
+
+如果你想把 web 部署到一台独立机器上，对接远程 akapen-backend，把
+`docker-compose.yml` 里的 backend service 注掉，单独 `docker compose up web -d`，
+再把 `web/.env` 里 `AKAPEN_BASE_URL` 改成公网 / 内网 URL。**注意 hairpin 陷阱**
+（详见 `.cursor/plans/homework-frontend_*.plan.md` §八），跨机部署务必把
+`WEB_PUBLIC_BASE_URL` 也改成 backend 容器能解析到的地址。
+
 ### 2C2G + 3 Mbps 部署提示
 
 中台默认配置已经为「单校单机 + 公网 3 Mbps」做了带宽优化（详见
@@ -289,11 +346,30 @@ data/input/
 │   ├── grading.db          #   中台任务库（模式 B；首次启动自动创建）
 │   ├── uploads/            #   中台 multipart 上传 + 标准化后图片（模式 B）
 │   └── logs/               #   持久化运行日志（两种模式共享）
-├── pyproject.toml          # 依赖 single source of truth（uv 用）
+├── web/                    # 模式 C · 老师端 Next.js 应用（next dev / docker）
+│   ├── app/                #   App Router：(auth)/login + (app)/{classes,batches,grade,settings} + api/*
+│   ├── components/ui/      #   shadcn/ui（手写）：Button / Card / Dialog / Sheet / Table / Checkbox / ...
+│   ├── lib/
+│   │   ├── auth.ts / auth.config.ts   # NextAuth v5 Credentials + Prisma user 表
+│   │   ├── db.ts                      # Prisma client singleton
+│   │   ├── akapen.ts                  # akapen 中台 HTTP 客户端（创建任务 / 重试 / 退避）
+│   │   ├── hmac.ts                    # 图片签名 URL + webhook 验签（HMAC-SHA256）
+│   │   ├── uploads.ts                 # 上传配置 + magic-byte 格式检测
+│   │   ├── grade-data.ts              # 批改大盘数据装载
+│   │   └── actions/{classes,batches,grade}.ts  # server actions
+│   ├── prisma/
+│   │   ├── schema.prisma              # User / Class / Student / HomeworkBatch / Question / Submission / GradingTask
+│   │   └── migrations/                # prisma migrate 产物，docker entrypoint 跑 migrate deploy
+│   ├── data/                          # ⚠ gitignore；docker bind-mount 挂回宿主：./web/data → /app/data
+│   ├── scripts/create-user.ts         # 命令行加老师账号
+│   ├── Dockerfile                     # 三阶段（deps/build/runtime），node:22-alpine + non-root
+│   ├── docker-entrypoint.sh           # prisma migrate deploy → node server.js
+│   └── .env.example                   # AUTH_SECRET / IMAGE_URL_SECRET / AKAPEN_BASE_URL ...
+├── pyproject.toml          # python 依赖 single source of truth（uv 用，模式 A/B）
 ├── uv.lock                 # uv 锁文件（committed，复现性靠它）
-├── requirements.txt        # uv export 自动生成，仅供 Docker 构建用
+├── requirements.txt        # uv export 自动生成，仅供 backend Docker 构建用
 ├── Dockerfile              # python:3.12-slim + non-root + healthcheck（模式 B）
-├── docker-compose.yml      # 一键部署：8000 端口 + ./data 挂载 + 1.5G 内存上限
+├── docker-compose.yml      # 一键部署 backend + web：3000/8000 端口 + ./data + ./web/data 挂载
 ├── .dockerignore           # 排除 venv / git / data / dataset 等
 └── AGENTS.md               # 给 AI 改这个仓库时看的架构指南
 ```

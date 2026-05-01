@@ -20,7 +20,7 @@ import aiosqlite
 logger = logging.getLogger("backend.db")
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 # ---- 表定义 ---- #
@@ -163,12 +163,29 @@ class Database:
             )
             logger.info("Applied schema migration v1")
 
-        # 后续版本：if 2 not in applied: await self._apply_v2() ...
+        if 2 not in applied:
+            await self._apply_v2()
+            await self._conn.execute(
+                "INSERT INTO schema_versions(version, applied_at) "
+                "VALUES (2, datetime('now'))"
+            )
+            logger.info("Applied schema migration v2")
 
     async def _apply_v1(self) -> None:
         await self._conn.execute(CREATE_TASKS_SQL)
         for sql in CREATE_INDEXES_SQL:
             await self._conn.execute(sql)
+
+    async def _apply_v2(self) -> None:
+        """加 question_context 列。给 web 老师端按题批改用——题干 / 评分要点会随
+        请求一起送进来，由 core/grader._prepend_question_context 拼到 prompt 顶部。
+
+        SQLite 限制：ALTER ADD COLUMN 必须 NULL 默认值（不能指定 DEFAULT）。
+        没问题，我们本来就允许这字段为空（老 multipart 调用方根本不传）。
+        """
+        await self._conn.execute(
+            "ALTER TABLE grading_tasks ADD COLUMN question_context TEXT"
+        )
 
 
 # ---- helper：让 Row 转 dict 时容错 None / JSON 字段 ---- #
