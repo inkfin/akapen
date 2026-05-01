@@ -21,7 +21,7 @@ type CellLabel = {
   pending: boolean; // 是否需要继续轮询
 };
 
-function describeCell(c: CellState, maxScore: number): CellLabel {
+function describeCell(c: CellState, fallbackMaxScore: number): CellLabel {
   if (!c.submissionId) {
     return { text: "未交", variant: "outline", pending: false };
   }
@@ -29,12 +29,14 @@ function describeCell(c: CellState, maxScore: number): CellLabel {
     return { text: "已交未批", variant: "info", pending: false };
   }
   const t = c.latest;
+  // 优先用 LLM 真实输出的 max（来自 result.max_score）；没有的兜底到题目登记值
+  const max = t.maxScore ?? fallbackMaxScore;
   switch (t.status) {
     case "succeeded":
       return {
         text:
           t.finalScore !== null
-            ? `${t.finalScore}/${maxScore}${t.reviewFlag ? " ⚠" : ""}`
+            ? `${t.finalScore}/${max}${t.reviewFlag ? " ⚠" : ""}`
             : "已批",
         variant: t.reviewFlag ? "warning" : "success",
         pending: false,
@@ -203,13 +205,13 @@ export function GradeBoard({
   return (
     <div className="space-y-3">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-[--color-card] p-3">
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3">
         <Checkbox
           checked={allSelected ? true : someSelected ? "indeterminate" : false}
           onCheckedChange={(v) => selectAll(v === true)}
           aria-label="全选"
         />
-        <span className="text-sm text-[--color-muted-foreground]">
+        <span className="text-sm text-muted-foreground">
           已选 {selected.size} / {allSelectable} 单元格
         </span>
         <div className="flex-1" />
@@ -236,10 +238,10 @@ export function GradeBoard({
       </div>
 
       {/* Matrix */}
-      <div className="overflow-x-auto rounded-lg border bg-[--color-card]">
+      <div className="overflow-x-auto rounded-lg border bg-card">
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b bg-[--color-muted]/50">
+            <tr className="border-b bg-muted/50">
               <th className="w-10 p-2"></th>
               <th className="min-w-32 p-2 text-left">学生</th>
               {data.questions.map((q) => {
@@ -294,7 +296,7 @@ export function GradeBoard({
                   </td>
                   <td className="p-2">
                     <div className="font-medium">{s.name}</div>
-                    <div className="font-mono text-xs text-[--color-muted-foreground]">
+                    <div className="font-mono text-xs text-muted-foreground">
                       {s.externalId}
                     </div>
                   </td>

@@ -115,6 +115,10 @@ export async function POST(req: Request) {
           payload.result && typeof payload.result.final_score === "number"
             ? payload.result.final_score
             : null,
+        maxScore:
+          payload.result && typeof payload.result.max_score === "number"
+            ? payload.result.max_score
+            : null,
         reviewFlag:
           payload.result && payload.result.review_flag === true ? true : false,
         errorCode: payload.error?.code ?? null,

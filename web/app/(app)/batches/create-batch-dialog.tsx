@@ -65,7 +65,7 @@ export function CreateBatchDialog({
               name="classId"
               required
               defaultValue={defaultClassId ?? classes[0]?.id ?? ""}
-              className="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[--color-ring]"
+              className="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               {classes.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>

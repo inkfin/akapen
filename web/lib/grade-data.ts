@@ -22,6 +22,9 @@ export type CellState = {
     status: string;
     revision: number;
     finalScore: number | null;
+    // LLM 评分时实际用的满分（来自 result.max_score）；UI 显示优先用这个，
+    // null（未批改 / 任务挂了）时回退到 question.maxScore
+    maxScore: number | null;
     reviewFlag: boolean;
     errorCode: string | null;
     errorMessage: string | null;
@@ -97,6 +100,7 @@ export async function loadGradeBoard(
               status: latest.status,
               revision: latest.revision,
               finalScore: latest.finalScore,
+              maxScore: latest.maxScore,
               reviewFlag: latest.reviewFlag,
               errorCode: latest.errorCode,
               errorMessage: latest.errorMessage,

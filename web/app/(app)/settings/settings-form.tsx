@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -18,16 +20,21 @@ import {
   DEFAULT_PROMPT_GRADING,
   DEFAULT_PROMPT_OCR,
   DEFAULT_PROMPT_SINGLE_SHOT,
-  GRADING_PROVIDERS,
-  OCR_PROVIDERS,
+  GRADING_MODELS,
+  OCR_MODELS,
+  findGradingModel,
+  findOcrModel,
   isLikelyVisionModel,
-  modelsFor,
+  type ModelOption,
 } from "@/lib/model-catalog";
+
+const CUSTOM_OPTION_ID = "__custom__";
 
 export function SettingsForm({ initial }: { initial: WebSettingsView }) {
   const [s, setS] = useState<WebSettingsView>(initial);
   const [pending, startTransition] = useTransition();
   const [testing, setTesting] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   function update<K extends keyof WebSettingsView>(
     key: K,
@@ -63,146 +70,185 @@ export function SettingsForm({ initial }: { initial: WebSettingsView }) {
     }
   }
 
-  const gradingIsVision = isLikelyVisionModel(s.gradingModel);
-  const ocrIsVision = isLikelyVisionModel(s.ocrModel);
+  // 当前批改模型在 catalog 里的 hit 信息（推荐 / 视觉徽章 / 注释 都用这个）
+  const gradingHit = findGradingModel(s.gradingProvider, s.gradingModel);
+  const gradingIsVision = isLikelyVisionModel(s.gradingProvider, s.gradingModel);
+  const ocrHit = findOcrModel(s.ocrProvider, s.ocrModel);
+
+  // 模型不是视觉的时候，OCR 兜底面板必然要展开（否则跑不出结果），自动展开高级
+  const needOcrFallback = !gradingIsVision;
 
   return (
     <div className="space-y-4">
-      {/* ────── 模型选择 ────── */}
+      {/* ────── 主区：批改模型 ────── */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">批改 / 转写模型</CardTitle>
-          <p className="text-xs text-[--color-muted-foreground]">
-            下拉给的是常见模型；找不到的可以直接键入快照名（如{" "}
-            <code>qwen3-vl-plus-2025-09-23</code>）。模型名 backend 不做白名单校验，
-            但 provider 必须是已注册的。
+          <CardTitle className="text-base">批改模型</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            选一个视觉模型最省事，老师传图、模型直接打分。视觉模型旁边有「视觉」徽章。
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <ProviderModelRow
-              labelPrefix="批改"
-              providerOptions={GRADING_PROVIDERS}
-              modelOptions={modelsFor(s.gradingProvider, "grading")}
-              provider={s.gradingProvider}
-              model={s.gradingModel}
-              onProvider={(v) => update("gradingProvider", v)}
-              onModel={(v) => update("gradingModel", v)}
-              hint={
-                gradingIsVision
-                  ? "✓ 视觉模型，可走 single-shot（看图直出 JSON）"
-                  : "⚠ 推测为纯文本模型，single-shot 会自动退化为两步"
-              }
-            />
-            <ProviderModelRow
-              labelPrefix="OCR"
-              providerOptions={OCR_PROVIDERS}
-              modelOptions={modelsFor(s.ocrProvider, "ocr")}
-              provider={s.ocrProvider}
-              model={s.ocrModel}
-              onProvider={(v) => update("ocrProvider", v)}
-              onModel={(v) => update("ocrModel", v)}
-              hint={
-                ocrIsVision
-                  ? "✓ 视觉模型，可识别学生手写图"
-                  : "⚠ OCR 必须用视觉模型，非视觉会直接挂"
-              }
-            />
-          </div>
+          <ModelSelector
+            options={GRADING_MODELS}
+            current={{ provider: s.gradingProvider, model: s.gradingModel }}
+            onPick={(opt) => {
+              update("gradingProvider", opt.provider);
+              update("gradingModel", opt.model);
+            }}
+          />
+          {gradingHit?.note ? (
+            <p className="rounded-md border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+              {gradingHit.note}
+            </p>
+          ) : null}
+          {needOcrFallback ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
+              选了纯文本模型，模型本身看不到图。批改时会先用「OCR
+              兜底模型」把图转成文字再批改 ──
+              请在下方<button
+                type="button"
+                className="mx-1 underline"
+                onClick={() => setAdvancedOpen(true)}
+              >
+                高级设置
+              </button>
+              里确认 OCR 模型。
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
-      {/* ────── 行为开关 ────── */}
+      {/* ────── 主区：批改 prompt ────── */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">批改行为</CardTitle>
+          <CardTitle className="text-base">批改提示词</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            告诉模型怎么改作文 ── 评分维度、扣分细则、输出格式。默认是中文作文 100
+            分模板，schema 已对齐。改完点保存就生效。
+          </p>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <ToggleRow
-            id="enable-single-shot"
-            label="single-shot：一次调用同时转写 + 评分"
-            hint="批改模型是视觉模型时建议开。带宽 / 延迟最优。"
-            checked={s.enableSingleShot}
-            onChange={(v) => update("enableSingleShot", v)}
-          />
-          <ToggleRow
-            id="grading-with-image"
-            label="两步模式下批改阶段也带图（vision 批改）"
-            hint="single-shot 关闭时才生效。带图能让模型对照原图修正 OCR 错误，但带宽 ×2。"
-            checked={s.gradingWithImage}
-            onChange={(v) => update("gradingWithImage", v)}
-            disabled={s.enableSingleShot}
-          />
-          <ToggleRow
-            id="grading-thinking"
-            label="批改启用思考模式（thinking）"
-            hint="部分模型支持（qwen3-vl-thinking、gemini-2.5-pro 等）；不支持的会自动忽略。"
-            checked={s.gradingThinking}
-            onChange={(v) => update("gradingThinking", v)}
-          />
-        </CardContent>
-      </Card>
-
-      {/* ────── Prompts ────── */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1">
-              <CardTitle className="text-base">自定义 prompts</CardTitle>
-              <p className="mt-1 text-xs text-[--color-muted-foreground]">
-                默认预填的是「中文作文 100 分」推荐模板（schema-correct）。
-                想改格式 / 评分细则就改下面对应栏。每段 ≤ 16,000 字符。
-                <br />
-                清空某栏后保存 = 存 NULL，那次跑批改时 backend 会退回到{" "}
-                <code>prompts/*.md</code> 默认（注意：默认是日语作文 30 分模板，
-                schema 不一定匹配新作文类型）。
-                <br />
-                模板里可以用 <code>{"{student_name}"}</code> /{" "}
-                <code>{"{student_id}"}</code> /{" "}
-                <code>{"{transcription}"}</code>（OCR 草稿）/{" "}
-                <code>{"{ocr_review_block}"}</code> 占位符；
-                题干会被 backend 自动拼到 prompt 顶部。
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
+        <CardContent>
+          <PromptField
+            label={
+              gradingIsVision
+                ? "single-shot 提示词（看图同时转写 + 评分）"
+                : "批改提示词（看 OCR 转写打分）"
+            }
+            value={
+              gradingIsVision ? s.singleShotPrompt : s.gradingPrompt
+            }
+            onChange={(v) =>
+              update(
+                gradingIsVision ? "singleShotPrompt" : "gradingPrompt",
+                v,
+              )
+            }
+            rows={10}
+            onReset={() => {
+              if (gradingIsVision) {
                 update("singleShotPrompt", DEFAULT_PROMPT_SINGLE_SHOT);
-                update("ocrPrompt", DEFAULT_PROMPT_OCR);
+              } else {
                 update("gradingPrompt", DEFAULT_PROMPT_GRADING);
-                toast.success("已重置为推荐模板（中文作文 100 分）");
-              }}
-            >
-              重置为推荐模板
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <PromptField
-            label="single-shot prompt（看图同时转写 + 评分）"
-            value={s.singleShotPrompt}
-            onChange={(v) => update("singleShotPrompt", v)}
-            rows={8}
-          />
-          <PromptField
-            label="OCR prompt（仅两步模式用）"
-            value={s.ocrPrompt}
-            onChange={(v) => update("ocrPrompt", v)}
-            rows={5}
-          />
-          <PromptField
-            label="批改 prompt（仅两步模式用）"
-            value={s.gradingPrompt}
-            onChange={(v) => update("gradingPrompt", v)}
-            rows={8}
+              }
+              toast.success("已重置为推荐模板（中文作文 100 分）");
+            }}
           />
         </CardContent>
+      </Card>
+
+      {/* ────── 高级 ────── */}
+      <Card>
+        <CardHeader className="cursor-pointer select-none" onClick={() => setAdvancedOpen((v) => !v)}>
+          <CardTitle className="flex items-center gap-2 text-base">
+            {advancedOpen ? (
+              <ChevronDown className="size-4" />
+            ) : (
+              <ChevronRight className="size-4" />
+            )}
+            高级设置
+            <span className="text-xs font-normal text-muted-foreground">
+              （思考模式、OCR 兜底、其他 prompt）
+            </span>
+          </CardTitle>
+        </CardHeader>
+        {advancedOpen ? (
+          <CardContent className="space-y-5">
+            <ToggleRow
+              id="grading-thinking"
+              label="启用思考模式"
+              hint="部分模型支持深度思考（qwen3-vl-thinking、gemini-2.5-pro 等）；不支持的会自动忽略。开了之后批改更慢但更准。"
+              checked={s.gradingThinking}
+              onChange={(v) => update("gradingThinking", v)}
+            />
+
+            <div className="space-y-3 rounded-md border p-3">
+              <div className="space-y-1">
+                <h3 className="text-sm font-medium">OCR 兜底模型</h3>
+                <p className="text-xs text-muted-foreground">
+                  当批改模型是纯文本时，需要先用 OCR
+                  把图转成文字。这里选的模型必须能看图（视觉）。
+                  {gradingIsVision ? (
+                    <>
+                      <br />
+                      <span className="text-emerald-600 dark:text-emerald-400">
+                        当前批改模型是视觉的，这个设置用不到 ── 但保留，方便切换。
+                      </span>
+                    </>
+                  ) : null}
+                </p>
+              </div>
+              <ModelSelector
+                options={OCR_MODELS}
+                current={{ provider: s.ocrProvider, model: s.ocrModel }}
+                onPick={(opt) => {
+                  update("ocrProvider", opt.provider);
+                  update("ocrModel", opt.model);
+                }}
+              />
+              {ocrHit?.note ? (
+                <p className="text-xs text-muted-foreground">{ocrHit.note}</p>
+              ) : null}
+              <PromptField
+                label="OCR 提示词"
+                value={s.ocrPrompt}
+                onChange={(v) => update("ocrPrompt", v)}
+                rows={4}
+                onReset={() => {
+                  update("ocrPrompt", DEFAULT_PROMPT_OCR);
+                  toast.success("已重置为推荐模板");
+                }}
+              />
+            </div>
+
+            {/* 视觉模型也保留两步模式的 prompt（手动想用 OCR + 批改两步时用） */}
+            {gradingIsVision ? (
+              <details className="rounded-md border p-3">
+                <summary className="cursor-pointer text-sm font-medium">
+                  两步模式批改提示词（少数老师才用）
+                </summary>
+                <p className="mt-2 mb-3 text-xs text-muted-foreground">
+                  当前用的是 single-shot
+                  一次过，不会用到这条；保留是为了你切到两步模式时不丢配置。
+                </p>
+                <PromptField
+                  label="批改提示词（两步模式）"
+                  value={s.gradingPrompt}
+                  onChange={(v) => update("gradingPrompt", v)}
+                  rows={6}
+                  onReset={() => {
+                    update("gradingPrompt", DEFAULT_PROMPT_GRADING);
+                    toast.success("已重置");
+                  }}
+                />
+              </details>
+            ) : null}
+          </CardContent>
+        ) : null}
       </Card>
 
       {/* ────── 操作栏 ────── */}
-      <div className="sticky bottom-0 -mx-4 flex items-center justify-end gap-2 border-t bg-[--color-background] px-4 py-3 md:mx-0 md:rounded-md md:border">
+      <div className="sticky bottom-0 -mx-4 flex items-center justify-end gap-2 border-t bg-background px-4 py-3 md:mx-0 md:rounded-md md:border">
         <Button variant="outline" onClick={onTest} disabled={testing}>
           {testing ? "测试中…" : "测试 akapen 连接"}
         </Button>
@@ -214,62 +260,106 @@ export function SettingsForm({ initial }: { initial: WebSettingsView }) {
   );
 }
 
-function ProviderModelRow({
-  labelPrefix,
-  providerOptions,
-  modelOptions,
-  provider,
-  model,
-  onProvider,
-  onModel,
-  hint,
+// ───── 模型选择器（合并 provider+model 成单 select；带视觉/文本徽章 + 自定义） ─────
+
+function ModelSelector({
+  options,
+  current,
+  onPick,
 }: {
-  labelPrefix: string;
-  providerOptions: readonly string[];
-  modelOptions: readonly string[];
-  provider: string;
-  model: string;
-  onProvider: (v: string) => void;
-  onModel: (v: string) => void;
-  hint: string;
+  options: ModelOption[];
+  current: { provider: string; model: string };
+  onPick: (next: { provider: string; model: string }) => void;
 }) {
-  const datalistId = `dl-${labelPrefix}-${Math.random().toString(36).slice(2, 7)}`;
+  const matchedId = useMemo(() => {
+    const hit = options.find(
+      (o) => o.provider === current.provider && o.model === current.model,
+    );
+    return hit?.id ?? CUSTOM_OPTION_ID;
+  }, [options, current.provider, current.model]);
+
+  const isCustom = matchedId === CUSTOM_OPTION_ID;
+
   return (
-    <div className="space-y-2 rounded-md border p-3">
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <Label className="text-xs">{labelPrefix} provider</Label>
-          <select
-            className="h-9 w-full rounded-md border border-[--color-input] bg-transparent px-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-[--color-ring] focus-visible:outline-none"
-            value={provider}
-            onChange={(e) => onProvider(e.target.value)}
-          >
-            {providerOptions.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">{labelPrefix} model</Label>
-          <Input
-            list={datalistId}
-            value={model}
-            onChange={(e) => onModel(e.target.value)}
-            placeholder="e.g. qwen3-vl-plus"
-          />
-          <datalist id={datalistId}>
-            {modelOptions.map((m) => (
-              <option key={m} value={m} />
-            ))}
-          </datalist>
-        </div>
+    <div className="space-y-2">
+      <Label className="text-xs">选择模型</Label>
+      <select
+        className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        value={matchedId}
+        onChange={(e) => {
+          const id = e.target.value;
+          if (id === CUSTOM_OPTION_ID) return;
+          const opt = options.find((o) => o.id === id);
+          if (opt) onPick(opt);
+        }}
+      >
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.label}
+            {o.recommended ? "  ★推荐" : ""}
+            {o.vision ? "  [视觉]" : "  [文本]"}
+          </option>
+        ))}
+        <option value={CUSTOM_OPTION_ID}>── 自定义模型 ──</option>
+      </select>
+
+      {/* 当前选中的徽章（不在 select 里，因为 native select 不支持富内容） */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {isCustom ? (
+          <Badge variant="outline">自定义</Badge>
+        ) : (
+          (() => {
+            const hit = options.find((o) => o.id === matchedId)!;
+            return (
+              <>
+                <Badge variant={hit.vision ? "success" : "secondary"}>
+                  {hit.vision ? "视觉" : "文本"}
+                </Badge>
+                {hit.recommended ? (
+                  <Badge variant="info">推荐</Badge>
+                ) : null}
+              </>
+            );
+          })()
+        )}
       </div>
-      <p className="text-xs text-[--color-muted-foreground]">{hint}</p>
+
+      {/* 自定义模式：让用户填 provider + model */}
+      {isCustom ? (
+        <div className="grid grid-cols-2 gap-2 rounded-md border p-3">
+          <div className="space-y-1">
+            <Label className="text-xs">provider</Label>
+            <select
+              className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+              value={current.provider}
+              onChange={(e) => onPick({ provider: e.target.value, model: current.model })}
+            >
+              <option value="qwen">qwen</option>
+              <option value="gemini">gemini</option>
+              <option value="claude">claude</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">model id</Label>
+            <Input
+              value={current.model}
+              onChange={(e) => onPick({ provider: current.provider, model: e.target.value })}
+              placeholder="e.g. qwen3-vl-plus-2025-09-23"
+            />
+          </div>
+          <p className="col-span-2 text-xs text-muted-foreground">
+            高级用法：粘贴模型快照或非默认 provider。backend 必须已注册该 provider
+            +
+            配好对应 API key（claude 需要 ANTHROPIC_API_KEY），否则跑批改会报
+            PROVIDER_ERROR。
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }
+
+// ───── helpers ─────
 
 function ToggleRow({
   id,
@@ -300,7 +390,7 @@ function ToggleRow({
         <Label htmlFor={id} className="cursor-pointer text-sm">
           {label}
         </Label>
-        <p className="text-xs text-[--color-muted-foreground]">{hint}</p>
+        <p className="text-xs text-muted-foreground">{hint}</p>
       </div>
     </div>
   );
@@ -311,19 +401,32 @@ function PromptField({
   value,
   onChange,
   rows,
+  onReset,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   rows: number;
+  onReset?: () => void;
 }) {
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between">
         <Label className="text-xs">{label}</Label>
-        <span className="text-xs text-[--color-muted-foreground]">
-          {value.length} / 16000
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {value.length} / 16000
+          </span>
+          {onReset ? (
+            <button
+              type="button"
+              className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+              onClick={onReset}
+            >
+              重置为推荐模板
+            </button>
+          ) : null}
+        </div>
       </div>
       <Textarea
         value={value}

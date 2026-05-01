@@ -35,7 +35,7 @@ export default async function GradePage({
             </Button>
             <div>
               <h1 className="text-xl font-semibold">{data.batchTitle}</h1>
-              <p className="text-sm text-[--color-muted-foreground]">
+              <p className="text-sm text-muted-foreground">
                 {data.className} · {data.students.length} 名学生 · {data.questions.length} 题
               </p>
             </div>

@@ -49,7 +49,7 @@ export default async function UploadPickStudentPage({
         </Button>
         <div>
           <h1 className="text-lg font-semibold">{batch.title}</h1>
-          <p className="text-sm text-[--color-muted-foreground]">
+          <p className="text-sm text-muted-foreground">
             选择学生 → 拍照上传
           </p>
         </div>
@@ -57,11 +57,11 @@ export default async function UploadPickStudentPage({
 
       {batch.questions.length === 0 ? (
         <Card>
-          <CardContent className="p-6 text-sm text-[--color-muted-foreground]">
+          <CardContent className="p-6 text-sm text-muted-foreground">
             还没有题目，先去
             <Link
               href={`/batches/${batch.id}`}
-              className="mx-1 text-[--color-primary] underline"
+              className="mx-1 text-primary underline"
             >
               添加题目
             </Link>
@@ -79,11 +79,11 @@ export default async function UploadPickStudentPage({
                 href={`/batches/${batch.id}/upload/${s.id}`}
                 className="block"
               >
-                <Card className="hover:border-[--color-ring] transition-colors active:scale-[0.99]">
+                <Card className="hover:border-ring transition-colors active:scale-[0.99]">
                   <CardContent className="flex items-center justify-between p-4">
                     <div>
                       <div className="font-medium">{s.name}</div>
-                      <div className="text-xs text-[--color-muted-foreground] font-mono">
+                      <div className="text-xs text-muted-foreground font-mono">
                         {s.externalId}
                       </div>
                     </div>
@@ -99,7 +99,7 @@ export default async function UploadPickStudentPage({
                       >
                         {done} / {total}
                       </Badge>
-                      <ChevronRight className="size-4 text-[--color-muted-foreground]" />
+                      <ChevronRight className="size-4 text-muted-foreground" />
                     </div>
                   </CardContent>
                 </Card>

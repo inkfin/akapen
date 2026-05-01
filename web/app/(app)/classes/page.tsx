@@ -26,7 +26,7 @@ export default async function ClassesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">班级管理</h1>
-          <p className="text-sm text-[--color-muted-foreground]">
+          <p className="text-sm text-muted-foreground">
             创建班级 → 录入学生名单 → 在「作业批次」里给班级布置作业
           </p>
         </div>
@@ -45,7 +45,7 @@ export default async function ClassesPage() {
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {classes.map((c) => (
-            <Card key={c.id} className="hover:border-[--color-ring] transition-colors">
+            <Card key={c.id} className="hover:border-ring transition-colors">
               <CardHeader>
                 <CardTitle>{c.name}</CardTitle>
                 <CardDescription>

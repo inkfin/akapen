@@ -46,7 +46,7 @@ export default async function BatchesPage({
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">作业批次</h1>
-          <p className="text-sm text-[--color-muted-foreground]">
+          <p className="text-sm text-muted-foreground">
             {filteredClass
               ? `已筛选：${filteredClass.name}`
               : "为某个班级创建一份新作业，加入若干题目"}
@@ -70,7 +70,7 @@ export default async function BatchesPage({
           <CardHeader>
             <CardTitle>请先创建班级</CardTitle>
             <CardDescription>
-              <Link href="/classes" className="text-[--color-primary] underline-offset-4 hover:underline">
+              <Link href="/classes" className="text-primary underline-offset-4 hover:underline">
                 去班级管理 →
               </Link>
             </CardDescription>
@@ -86,7 +86,7 @@ export default async function BatchesPage({
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {batches.map((b) => (
-            <Card key={b.id} className="hover:border-[--color-ring] transition-colors">
+            <Card key={b.id} className="hover:border-ring transition-colors">
               <CardHeader>
                 <CardTitle className="line-clamp-1">{b.title}</CardTitle>
                 <CardDescription>{b.class.name}</CardDescription>

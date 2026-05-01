@@ -48,11 +48,11 @@ export default async function UploadPerStudentPage({
         <div>
           <h1 className="text-lg font-semibold">
             {student.name}{" "}
-            <span className="text-sm font-mono text-[--color-muted-foreground]">
+            <span className="text-sm font-mono text-muted-foreground">
               {student.externalId}
             </span>
           </h1>
-          <p className="text-sm text-[--color-muted-foreground]">{batch.title}</p>
+          <p className="text-sm text-muted-foreground">{batch.title}</p>
         </div>
       </div>
 
@@ -67,11 +67,11 @@ export default async function UploadPerStudentPage({
               <CardHeader>
                 <CardTitle className="text-base">
                   第 {q.index} 题
-                  <span className="ml-2 text-xs font-normal text-[--color-muted-foreground]">
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
                     {paths.length} 张图
                   </span>
                 </CardTitle>
-                <p className="text-sm text-[--color-foreground] line-clamp-2">
+                <p className="text-sm text-foreground line-clamp-2">
                   {q.prompt}
                 </p>
               </CardHeader>

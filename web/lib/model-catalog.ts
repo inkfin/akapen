@@ -1,54 +1,163 @@
-// 与 core/config.py 的 OCR/GRADING_MODEL_CATALOG 同步。
-// 这里只是 UI 的下拉提示，dropdown 都是 allow custom value 的，
-// 老师可以粘贴 catalog 里没列的快照（如 qwen3-vl-plus-2025-09-23）。
+// 与 core/providers/__init__.py:_REGISTRY 对齐的 provider 清单。
+// 这里只是 UI 的下拉提示，老师可以走「自定义模型」粘贴 catalog 里没列的快照
+// （如 qwen3-vl-plus-2025-09-23）。backend 只校验 provider 是否注册过，不校验 model 名。
 //
-// 同步原则：每次后端 catalog 变了就更新这里；不一致也不会出错（backend 会校验 provider 名）。
+// **维护原则**：保证 qwen / gemini 两条线开箱可用，因为部署默认配置只有
+// DASHSCOPE_API_KEY + GEMINI_API_KEY。Claude 路径放到「自定义」里 ——
+// 用户必须自己往 backend .env 加 ANTHROPIC_API_KEY 才能跑通，不该在主下拉里
+// 误导老师以为选了就能用。
 
-export const PROVIDERS = ["qwen", "gemini", "claude"] as const;
-export type ProviderId = (typeof PROVIDERS)[number];
+export type ProviderId = "qwen" | "gemini" | "claude";
 
-export const OCR_MODEL_CATALOG: Record<string, readonly string[]> = {
-  qwen: ["qwen3-vl-plus", "qwen3-vl-flash"],
-  gemini: [
-    "gemini-3.1-pro",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-  ],
+/**
+ * UI 主下拉里的"模型选项"。每个选项把 provider + model 合并成一行，
+ * 老师不用先选 provider 再过滤 model，对非技术用户更直观。
+ *
+ * `vision` 标记决定：
+ *   - 主操作里给徽章「视觉」/「文本」
+ *   - 选了文本模型时高级面板里 OCR 兜底自动展开提示
+ *   - 影响是否走 single-shot（backend worker 自己判断，前端只是 UI 提示）
+ *
+ * `recommended` 仅作 UI badge，backend 不识别。
+ *
+ * `note` 是面向老师的简短中文说明，「为什么我会选这个」级别。
+ */
+export type ModelOption = {
+  id: string; // 唯一 key，UI 用
+  label: string; // 下拉里展示的"Qwen — qwen3-vl-plus"
+  provider: ProviderId;
+  model: string;
+  vision: boolean;
+  recommended?: boolean;
+  thinking?: boolean; // 该模型本身就走思考模式（开关无意义）
+  note?: string;
 };
 
-export const GRADING_MODEL_CATALOG: Record<string, readonly string[]> = {
-  qwen: [
-    "qwen3-vl-plus",
-    "qwen3-vl-flash",
-    "qwen3.6-plus",
-    "qwen3.6-flash",
-    "qwen3.5-plus",
-    "qwen3.5-flash",
-  ],
-  gemini: [
-    "gemini-3.1-pro",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-  ],
-  claude: ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5"],
-};
+/**
+ * 批改用模型清单。视觉模型排前面 + 标"推荐"，因为 single-shot 一次过的体验最好。
+ * 纯文本模型排后面 ── 选了之后 backend 会自动退化为「OCR + 批改」两步，
+ * 此时高级面板里的 OCR 设置才有意义。
+ */
+export const GRADING_MODELS: ModelOption[] = [
+  {
+    id: "qwen-vl-plus",
+    label: "Qwen · qwen3-vl-plus",
+    provider: "qwen",
+    model: "qwen3-vl-plus",
+    vision: true,
+    recommended: true,
+    note: "阿里通义视觉版，性价比最佳。看图同时打分，单次调用搞定。",
+  },
+  {
+    id: "qwen-vl-flash",
+    label: "Qwen · qwen3-vl-flash",
+    provider: "qwen",
+    model: "qwen3-vl-flash",
+    vision: true,
+    note: "Qwen 视觉版的 flash 档，更便宜、更快，但稳定性略低。",
+  },
+  {
+    id: "gemini-3-1-pro",
+    label: "Gemini · gemini-3.1-pro",
+    provider: "gemini",
+    model: "gemini-3.1-pro",
+    vision: true,
+    recommended: true,
+    note: "Google Gemini 旗舰，作文质量评估非常细。需要科学上网 + GEMINI_API_KEY。",
+  },
+  {
+    id: "gemini-2-5-pro",
+    label: "Gemini · gemini-2.5-pro",
+    provider: "gemini",
+    model: "gemini-2.5-pro",
+    vision: true,
+  },
+  {
+    id: "gemini-2-5-flash",
+    label: "Gemini · gemini-2.5-flash",
+    provider: "gemini",
+    model: "gemini-2.5-flash",
+    vision: true,
+    note: "Gemini 的 flash 档，速度快价格低，适合批量。",
+  },
+  // 纯文本模型 ── 选了之后 backend 自动走「OCR + 批改」两步
+  {
+    id: "qwen-text-plus",
+    label: "Qwen · qwen3.6-plus（纯文本）",
+    provider: "qwen",
+    model: "qwen3.6-plus",
+    vision: false,
+    note: "纯文本模型，看不到图。需要先用 OCR 模型把图转文字，再批改。",
+  },
+  {
+    id: "qwen-text-flash",
+    label: "Qwen · qwen3.6-flash（纯文本）",
+    provider: "qwen",
+    model: "qwen3.6-flash",
+    vision: false,
+  },
+];
 
-export const OCR_PROVIDERS = Object.keys(OCR_MODEL_CATALOG);
-export const GRADING_PROVIDERS = Object.keys(GRADING_MODEL_CATALOG);
+/**
+ * OCR 模型清单 ── 必须是视觉模型（看不到图就没法转写）。
+ * UI 只在批改模型是文本模型时才让用户选这个；视觉批改下根本走不到这条路径。
+ */
+export const OCR_MODELS: ModelOption[] = [
+  {
+    id: "qwen-vl-plus-ocr",
+    label: "Qwen · qwen3-vl-plus",
+    provider: "qwen",
+    model: "qwen3-vl-plus",
+    vision: true,
+    recommended: true,
+  },
+  {
+    id: "qwen-vl-flash-ocr",
+    label: "Qwen · qwen3-vl-flash",
+    provider: "qwen",
+    model: "qwen3-vl-flash",
+    vision: true,
+    note: "更便宜，作转写够用。",
+  },
+  {
+    id: "gemini-2-5-flash-ocr",
+    label: "Gemini · gemini-2.5-flash",
+    provider: "gemini",
+    model: "gemini-2.5-flash",
+    vision: true,
+  },
+  {
+    id: "gemini-2-5-pro-ocr",
+    label: "Gemini · gemini-2.5-pro",
+    provider: "gemini",
+    model: "gemini-2.5-pro",
+    vision: true,
+  },
+];
 
-export function modelsFor(
+export function findGradingModel(
   provider: string,
-  kind: "ocr" | "grading",
-): readonly string[] {
-  const catalog = kind === "ocr" ? OCR_MODEL_CATALOG : GRADING_MODEL_CATALOG;
-  return catalog[provider] ?? [];
+  model: string,
+): ModelOption | undefined {
+  return GRADING_MODELS.find(
+    (m) => m.provider === provider && m.model === model,
+  );
 }
 
-// 简单的 vision 判断（与 core/providers/qwen.py is_vision_model 同步）。
-// 没列出的就当 vision（保守开 single-shot）；前端只用作 UI 提示。
-export function isLikelyVisionModel(model: string): boolean {
+export function findOcrModel(
+  provider: string,
+  model: string,
+): ModelOption | undefined {
+  return OCR_MODELS.find((m) => m.provider === provider && m.model === model);
+}
+
+/**
+ * 给 UI 用：当前批改 provider+model 的能力推断。
+ * 优先用 catalog，命中就用 catalog 的 vision；catalog 没列就按模型 id 关键字猜。
+ */
+export function isLikelyVisionModel(provider: string, model: string): boolean {
+  const hit = findGradingModel(provider, model) ?? findOcrModel(provider, model);
+  if (hit) return hit.vision;
   if (!model) return false;
   const m = model.toLowerCase();
   return (

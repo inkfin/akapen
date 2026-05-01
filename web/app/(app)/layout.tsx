@@ -28,7 +28,7 @@ export default async function AppLayout({
   return (
     <div className="flex min-h-screen">
       {/* 桌面侧边栏 */}
-      <aside className="hidden w-56 flex-col border-r bg-[--color-card] md:flex">
+      <aside className="hidden w-56 flex-col border-r bg-card md:flex">
         <div className="flex h-14 items-center border-b px-4 font-semibold">
           akapen
         </div>
@@ -39,7 +39,7 @@ export default async function AppLayout({
               href={item.href}
               className={cn(
                 "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
-                "hover:bg-[--color-accent] hover:text-[--color-accent-foreground]",
+                "hover:bg-accent hover:text-accent-foreground",
               )}
             >
               <item.icon className="size-4" />
@@ -47,13 +47,13 @@ export default async function AppLayout({
             </Link>
           ))}
         </nav>
-        <div className="border-t p-3 text-xs text-[--color-muted-foreground]">
+        <div className="border-t p-3 text-xs text-muted-foreground">
           <div>{session.user.name}</div>
           <div>{session.user.email}</div>
           <form action={signOutAction} className="mt-2">
             <button
               type="submit"
-              className="flex items-center gap-1 text-[--color-foreground] hover:underline"
+              className="flex items-center gap-1 text-foreground hover:underline"
             >
               <LogOut className="size-3" /> 退出
             </button>
@@ -63,7 +63,7 @@ export default async function AppLayout({
 
       {/* 移动端顶栏 */}
       <div className="flex flex-1 flex-col">
-        <header className="flex h-14 items-center justify-between border-b bg-[--color-card] px-4 md:hidden">
+        <header className="flex h-14 items-center justify-between border-b bg-card px-4 md:hidden">
           <span className="font-semibold">akapen</span>
           <nav className="flex gap-3 text-sm">
             {NAV.map((item) => (

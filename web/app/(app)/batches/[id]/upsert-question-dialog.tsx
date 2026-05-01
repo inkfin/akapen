@@ -94,7 +94,7 @@ export function UpsertQuestionDialog({
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="maxScore">满分</Label>
+              <Label htmlFor="maxScore">满分（占位）</Label>
               <Input
                 id="maxScore"
                 name="maxScore"
@@ -105,6 +105,10 @@ export function UpsertQuestionDialog({
                 required
                 defaultValue={existing?.maxScore ?? 100}
               />
+              <p className="text-xs text-muted-foreground">
+                实际满分由批改 prompt 决定；这里只在未批改 / LLM 没返回 max_score
+                时作 UI 占位。
+              </p>
             </div>
           </div>
           <div className="grid gap-2">

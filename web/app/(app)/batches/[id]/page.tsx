@@ -53,7 +53,7 @@ export default async function BatchDetailPage({
           </Button>
           <div>
             <h1 className="text-xl font-semibold">{batch.title}</h1>
-            <p className="text-sm text-[--color-muted-foreground]">
+            <p className="text-sm text-muted-foreground">
               {batch.class.name} · {batch.class._count.students} 名学生 · {batch.questions.length} 题
             </p>
           </div>
@@ -96,7 +96,7 @@ export default async function BatchDetailPage({
                   <TableRow key={q.id}>
                     <TableCell className="font-mono">{q.index}</TableCell>
                     <TableCell className="max-w-md whitespace-pre-wrap">{q.prompt}</TableCell>
-                    <TableCell className="max-w-xs whitespace-pre-wrap text-xs text-[--color-muted-foreground]">
+                    <TableCell className="max-w-xs whitespace-pre-wrap text-xs text-muted-foreground">
                       {q.rubric ?? "—"}
                     </TableCell>
                     <TableCell>{q.maxScore}</TableCell>
@@ -122,7 +122,7 @@ export default async function BatchDetailPage({
                             size="icon"
                             aria-label={`删除第 ${q.index} 题`}
                           >
-                            <Trash2 className="size-4 text-[--color-destructive]" />
+                            <Trash2 className="size-4 text-destructive" />
                           </Button>
                         </form>
                       </div>

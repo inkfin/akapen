@@ -159,6 +159,10 @@ model GradingTask {
   status         String     @default("pending")
   result         String?    // 完整 GradingResult JSON 字符串
   finalScore     Float?     // 抽出来方便排序 / 筛选
+  // LLM 实际用的满分（与 GradingResult.max_score 同源）。Question.maxScore 是
+  // 老师建题时填的"期望满分"，但实际 max 由批改 prompt 决定，UI 显示优先用这个，
+  // 跑完批改才填；老题 / 跑挂的任务为 null，UI fallback 到 question.maxScore。
+  maxScore       Float?
   reviewFlag     Boolean    @default(false)
   errorCode      String?
   errorMessage   String?

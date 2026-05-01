@@ -89,6 +89,7 @@ export type CreateTaskResponse = {
 export type AkapenGradingResult = {
   // 只列我们 UI 用到的字段；其他字段透传到 GradingTask.result（JSON 字符串）。
   final_score?: number;
+  max_score?: number;
   review_flag?: boolean;
   ocr_text?: string;
   dimensions?: Array<{

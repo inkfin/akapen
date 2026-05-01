@@ -88,7 +88,7 @@ export function QuestionUploader({
           {paths.map((p) => (
             <div
               key={p}
-              className="group relative size-20 overflow-hidden rounded-md border bg-[--color-muted]"
+              className="group relative size-20 overflow-hidden rounded-md border bg-muted"
             >
               {/* 缩略图直接走我们 own /api/uploads-preview 内部路由（图片是私有的，要走 next 鉴权）。
                   这里在 client 里只能 fetch 然后 createObjectURL；但更简单的：用一个内部
@@ -104,7 +104,7 @@ export function QuestionUploader({
                 type="button"
                 onClick={() => handleDelete(p)}
                 disabled={pending}
-                className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-[--color-destructive] text-[--color-destructive-foreground] group-hover:flex"
+                className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-destructive text-destructive-foreground group-hover:flex"
                 aria-label="删除"
               >
                 <Trash2 className="size-3" />
@@ -113,7 +113,7 @@ export function QuestionUploader({
           ))}
         </div>
       ) : (
-        <p className="text-sm text-[--color-muted-foreground]">还没上传图片</p>
+        <p className="text-sm text-muted-foreground">还没上传图片</p>
       )}
 
       {/* 拍照 / 多选 */}

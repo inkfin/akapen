@@ -51,7 +51,7 @@ export function LoginForm() {
         />
       </div>
       {errorMessage ? (
-        <p className="text-sm text-[--color-destructive]" role="alert">
+        <p className="text-sm text-destructive" role="alert">
           {errorMessage}
         </p>
       ) : null}

@@ -50,7 +50,7 @@ export default async function ClassDetailPage({
           </Button>
           <div>
             <h1 className="text-xl font-semibold">{cls.name}</h1>
-            <p className="text-sm text-[--color-muted-foreground]">
+            <p className="text-sm text-muted-foreground">
               {cls.school ?? "未填学校"} · {cls.students.length} 名学生 · {cls._count.batches} 个作业批次
             </p>
           </div>
@@ -89,7 +89,7 @@ export default async function ClassDetailPage({
                           size="icon"
                           aria-label={`删除 ${s.name}`}
                         >
-                          <Trash2 className="size-4 text-[--color-destructive]" />
+                          <Trash2 className="size-4 text-destructive" />
                         </Button>
                       </form>
                     </TableCell>

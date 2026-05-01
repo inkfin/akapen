@@ -109,11 +109,14 @@ export function CellDetailSheet({
           {cell.latest?.finalScore !== null &&
           cell.latest?.finalScore !== undefined ? (
             <div className="text-2xl font-semibold">
-              {cell.latest.finalScore} <span className="text-base text-[--color-muted-foreground]">/ {question.maxScore}</span>
+              {cell.latest.finalScore}{" "}
+              <span className="text-base text-muted-foreground">
+                / {cell.latest.maxScore ?? question.maxScore}
+              </span>
             </div>
           ) : null}
           {cell.latest?.errorMessage ? (
-            <p className="mt-2 text-sm text-[--color-destructive]">
+            <p className="mt-2 text-sm text-destructive">
               {cell.latest.errorCode ? `[${cell.latest.errorCode}] ` : ""}
               {cell.latest.errorMessage}
             </p>
@@ -167,7 +170,7 @@ export function CellDetailSheet({
             </div>
           </div>
         ) : (
-          <p className="text-sm text-[--color-muted-foreground]">
+          <p className="text-sm text-muted-foreground">
             学生还没有上传图片。请去「移动端上传」录入照片再批改。
           </p>
         )}
