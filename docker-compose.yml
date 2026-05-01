@@ -76,8 +76,10 @@ services:
       WEB_PUBLIC_BASE_URL: http://web:3000
       # SQLite 落盘到挂载点
       DATABASE_URL: file:/app/data/web.db
-      # NextAuth 默认从 X-Forwarded-* 推 cookie domain；docker 内 service 名能解析就行
-      NEXTAUTH_URL: http://localhost:${WEB_HOST_PORT:-3000}
+      # ⚠ NEXTAUTH_URL 故意不在这里写。compose 的 environment 优先级高于
+      # env_file，硬编码会覆盖 web/.env 里的真实公网 URL，导致登录后跳 localhost
+      # 死链（手机端尤其明显）。请只在 web/.env 里配 NEXTAUTH_URL=...
+      #
       # NextAuth v5 默认在非 Vercel 环境拒绝任何 Host（防 host header 注入）。
       # 我们这里没用 Vercel，前面要么是 docker 端口直曝、要么是反代加 X-Forwarded-Host，
       # 都需要显式信任。
