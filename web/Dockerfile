@@ -12,11 +12,17 @@ WORKDIR /app
 
 # 只把 package.json + lock 复制过来，让这一层 cache 命中能省到秒级
 COPY package.json package-lock.json* .npmrc* ./
-RUN npm ci --no-audit --no-fund
+# --ignore-scripts：postinstall 里的 `prisma generate` 在 deps 阶段还没拷 prisma/，
+# 会找不到 schema 报错。build 阶段的 `npm run build` 会重跑 prisma generate，所以这里跳过即可。
+RUN npm ci --no-audit --no-fund --ignore-scripts
 
 # ---- 2. build：跑 prisma generate + next build → standalone output ----
 FROM node:22-alpine AS build
 WORKDIR /app
+
+# Prisma 在 generate 时要 dlopen libssl 才能判断 openssl 版本（1.1.x vs 3.0.x），
+# alpine 默认不带，会 warn 后退化到 1.1.x，导致下游 runtime 加载 3.0.x 引擎失败。
+RUN apk add --no-cache openssl
 
 # next build 期间会 fetch 在线 telemetry，关掉
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -51,27 +57,32 @@ ENV HOSTNAME=0.0.0.0
 # wget 用于 HEALTHCHECK；libstdc++ / openssl 是 prisma 的依赖
 RUN apk add --no-cache wget openssl libstdc++
 
-# 与 backend 容器一致的非 root 用户（uid=1000），给 host volume 挂载用
-RUN addgroup -S -g 1000 web && adduser -S -D -u 1000 -G web web
-
+# 复用 node:alpine 镜像里自带的非 root 用户 `node`（uid=1000、gid=1000），
+# 与 backend 容器的 akapen(uid=1000) 对齐宿主 volume owner，避免再 chown。
 # Next.js standalone：自带 server.js 入口和必要的 node_modules
-COPY --from=build --chown=web:web /app/.next/standalone ./
+COPY --from=build --chown=node:node /app/.next/standalone ./
 # standalone 不包括 .next/static 和 public，要单独拷
-COPY --from=build --chown=web:web /app/.next/static ./.next/static
-COPY --from=build --chown=web:web /app/public ./public
+COPY --from=build --chown=node:node /app/.next/static ./.next/static
+COPY --from=build --chown=node:node /app/public ./public
 
 # Prisma 运行时所需
-COPY --from=build --chown=web:web /app/prisma ./prisma
-COPY --from=build --chown=web:web /tmp/prisma-pack/prisma ./node_modules/prisma
-COPY --from=build --chown=web:web /tmp/prisma-pack/@prisma ./node_modules/@prisma
+COPY --from=build --chown=node:node /app/prisma ./prisma
+COPY --from=build --chown=node:node /tmp/prisma-pack/prisma ./node_modules/prisma
+COPY --from=build --chown=node:node /tmp/prisma-pack/@prisma ./node_modules/@prisma
 
-# 挂数据卷的目录预创建好（再 chown 给 web）
-RUN mkdir -p /app/data/uploads && chown -R web:web /app/data
+# 老师账号创建 CLI：standalone trace 不会自动包括 scripts/* 和它们引用的 bcryptjs，
+# 所以这里手动把脚本 + bcryptjs（纯 JS、~0.1MB、零原生依赖）拷过来。
+# 用法：docker compose exec web node scripts/create-user.cjs --email ... --password ... --name ...
+COPY --from=build --chown=node:node /app/scripts/create-user.cjs ./scripts/create-user.cjs
+COPY --from=build --chown=node:node /app/node_modules/bcryptjs ./node_modules/bcryptjs
 
-COPY --chown=web:web docker-entrypoint.sh ./docker-entrypoint.sh
+# 挂数据卷的目录预创建好（再 chown 给 node）
+RUN mkdir -p /app/data/uploads && chown -R node:node /app/data
+
+COPY --chown=node:node docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh
 
-USER web
+USER node
 EXPOSE 3000
 
 # Docker 健康检查：只 ping /api/health（不查 DB），避免 DB cold open 时挂掉

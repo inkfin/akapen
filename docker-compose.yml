@@ -78,6 +78,10 @@ services:
       DATABASE_URL: file:/app/data/web.db
       # NextAuth 默认从 X-Forwarded-* 推 cookie domain；docker 内 service 名能解析就行
       NEXTAUTH_URL: http://localhost:${WEB_HOST_PORT:-3000}
+      # NextAuth v5 默认在非 Vercel 环境拒绝任何 Host（防 host header 注入）。
+      # 我们这里没用 Vercel，前面要么是 docker 端口直曝、要么是反代加 X-Forwarded-Host，
+      # 都需要显式信任。
+      AUTH_TRUST_HOST: "true"
     volumes:
       # web.db + uploads/ 全部挂回宿主，容器删了数据不丢
       - ./web/data:/app/data

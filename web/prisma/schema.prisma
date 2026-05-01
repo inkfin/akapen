@@ -8,8 +8,9 @@
 
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
-  // ↑ alpine 容器跑 prisma 用得到 musl binary
+  // alpine 22 自带 openssl 3.x；同时列 x86_64 / arm64 让 M 系 Mac docker-desktop
+  // 与 x86_64 ECS 通用一份 schema、一次生成。"native" 留给开发机（Mac/Linux）。
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl-arm64-openssl-3.0.x"]
 }
 
 datasource db {

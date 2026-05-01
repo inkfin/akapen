@@ -64,7 +64,7 @@ docker compose up -d --build
 docker compose logs -f web        # 观察 prisma migrate 跑完 + Next ready
 
 # 4) 加初始账号
-docker compose exec web node ./node_modules/tsx scripts/create-user.ts \
+docker compose exec web node scripts/create-user.cjs \
   --email teacher@example.com --password 'mypassword' --name '王老师'
 
 # 5) 浏览器打开 http://<host>:3000，邮箱 + 密码登录

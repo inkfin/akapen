@@ -199,12 +199,10 @@ cp web/.env.example web/.env
 docker compose up -d --build
 
 # 4) 创建初始老师账号（学生不登录，老师代为录入）
-docker compose exec web node scripts/create-user.js \
+docker compose exec web node scripts/create-user.cjs \
   --email teacher@example.com --password 'mypassword' --name '王老师'
-# 注意：tsx 不在 production 镜像；docker 路径用编译后的 JS（standalone build 自带）。
-# 如果上面命令找不到 .js 文件，用：
-#   docker compose exec web node ./node_modules/tsx scripts/create-user.ts \
-#     --email ...
+# 注意：tsx 是 dev 依赖、不在 production 镜像；
+# Dockerfile 单独把 scripts/create-user.cjs + bcryptjs 拷进了运行时镜像。
 
 # 5) 浏览器打开 http://<host>:3000，邮箱+密码登录
 ```
