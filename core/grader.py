@@ -404,7 +404,8 @@ def _prepend_question_context(prompt: str, question_context: str | None) -> str:
     """在 prompt 顶部插入「本题题目」上下文段。
 
     设计取舍：
-    - 不改 prompts/grading.md 也不改 prompts/single_shot.md，原 prompt 当成"评分细则"
+    - 不改 grading.md 也不改 single_shot.md（demo/prompts/ 或 backend/prompts/ 的版本，
+      或者 web 端从 ``providerOverrides`` 传过来的版本），原 prompt 当成"评分细则"
       整体放下半段；这样老用户 settings.json 里存着的旧 prompt 也能直接用，无需重置。
     - 上下文为 None / 空白时直接返回原 prompt，老调用方不感知。
     - 截 4000 字防止恶意大 payload 把 token 撑爆（schemas 那边也会校验，这里是兜底）。
@@ -477,6 +478,10 @@ def _apply_quality_gates(result: GradingResult) -> GradingResult:
     """根据 confidence / 边界分数 / 字段缺失自动调高 ``review_flag``。
 
     返回修改后的副本（pydantic v2 ``model_copy``）；调用方应当用返回值覆盖原结果。
+
+    "不打分"模式（``final_score`` is None）：跳过分数相关的闸门检查，confidence 闸门
+    仍然适用 —— 对老师"只批注"的题型来说，模型自己说不太确定时仍然值得复核。
+    `dimension_scores` 为空在不打分模式下是预期行为（不再触发 missing_dimensions）。
     """
     reasons = list(result.review_reasons)
     flag = bool(result.review_flag)
@@ -490,11 +495,12 @@ def _apply_quality_gates(result: GradingResult) -> GradingResult:
     if result.confidence < _LOW_CONFIDENCE_THRESHOLD:
         _add("low_confidence")
 
-    rounded = round(result.final_score)
-    if abs(result.final_score - rounded) < 0.01 and rounded in _BOUNDARY_SCORES:
-        _add("boundary_score")
+    if result.final_score is not None:
+        rounded = round(result.final_score)
+        if abs(result.final_score - rounded) < 0.01 and rounded in _BOUNDARY_SCORES:
+            _add("boundary_score")
 
-    if not result.dimension_scores:
-        _add("missing_dimensions")
+        if not result.dimension_scores:
+            _add("missing_dimensions")
 
     return result.model_copy(update={"review_flag": flag, "review_reasons": reasons})

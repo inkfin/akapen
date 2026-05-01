@@ -88,24 +88,27 @@ backend 的 `WEBHOOK_SECRET` 做回调验签。
 | `core/ocr.py` | OCR 业务（多页合并 + thinking=False；`image_paths` 或 `image_bytes` 二选一） | `transcribe(...) -> str`、`OCRError` |
 | `core/grader.py` | 批改业务（vision/text 自动切换；markdown / json / single-shot 三种入口） | `grade()`、`grade_json()`、`single_shot()`、`GradingError` |
 | `core/logger.py` | 集中日志 + task_id contextvar 注入 | `setup_logging()`、`tail_log()`、`set_task_id()` / `reset_task_id()` |
-| `prompts/ocr.md` | OCR prompt | （文本资源） |
-| `prompts/grading.md` | 批改 prompt（要求**严格 JSON 输出**；含 `{ocr_review_block}` 占位符） | （文本资源） |
-| `prompts/single_shot.md` | Single-shot prompt（一次 vision 调用同时给 transcription + grading） | （文本资源） |
+
+> **`core/` 不再持有任何 prompt 文件**——三种入口各带一套独立 prompts，详见下面
+> 各模块文件地图 + 第 §九.5 节"prompt 模板的三套独立来源"。
 
 ### `demo/`（模式 A：离线 Gradio）
 
 | 文件 | 职责 | 关键导出 |
 | --- | --- | --- |
-| `demo/app.py` | Gradio UI 主入口（`uv run python -m demo.app`） | `build_ui()` |
+| `demo/app.py` | Gradio UI 主入口（`uv run python -m demo.app`） | `build_ui()`、`DEMO_PROMPTS_DIR` |
 | `demo/filenames.py` | `学号_姓名/页码.jpg` 文件夹扫描 | `scan_folder()` |
 | `demo/storage.py` | 每位学生一份 JSON 记录（落到 `data/records/`） | `StudentRecord`、`extract_score()`、`make_key()` |
+| `demo/prompts/ocr.md` | demo 模式 OCR prompt 默认（**通用框架自包含**，不绑题型） | （文本资源） |
+| `demo/prompts/grading.md` | demo 模式批改 prompt 默认（含 `{ocr_review_block}` 占位符；**不**含 `{rubric}`） | （文本资源） |
+| `demo/prompts/single_shot.md` | demo 模式 single-shot prompt 默认（**通用框架自包含**） | （文本资源） |
 
 ### `backend/`（模式 B：批改任务中台）
 
 | 文件 | 职责 | 关键导出 |
 | --- | --- | --- |
 | `backend/app.py` | FastAPI app 工厂 + lifespan + uvicorn 入口 | `create_app()`、`AppState`、`main()` |
-| `backend/config.py` | `BackendSettings`：core.Settings + API key / 并发 / 带宽 / DB 路径 | `BackendSettings.load()` |
+| `backend/config.py` | `BackendSettings`：core.Settings + API key / 并发 / 带宽 / DB 路径 | `BackendSettings.load()`、`BACKEND_PROMPTS_DIR` |
 | `backend/db.py` | aiosqlite 连接 + WAL 模式 + 幂等 schema 迁移 | `Database`、`row_to_dict` |
 | `backend/schemas.py` | API 边界 pydantic（请求 / 响应 / webhook payload） | `TaskCreateRequestJSON`、`TaskStatus`、`WebhookPayload`、状态机常量 |
 | `backend/repo.py` | 任务 CRUD + 幂等 INSERT + 状态机转换 + reclaim | `create_task`、`get_task`、`list_tasks`、`save_grading_result`、`reclaim_stuck_tasks` |
@@ -119,6 +122,9 @@ backend 的 `WEBHOOK_SECRET` 做回调验签。
 | `backend/token_bucket.py` | 异步全局上行字节令牌桶 | `TokenBucket.from_kbps()` |
 | `backend/metrics.py` | Prometheus 指标定义 | 各种 Counter / Histogram / Gauge |
 | `backend/admin_ui.py` | 只读 Gradio 后台（任务列表 / 详情 / 重试），挂在 `/admin` | `mount_admin`、`build_admin_ui` |
+| `backend/prompts/ocr.md` | backend worker fallback OCR prompt（web 没传 override 时用） | （文本资源） |
+| `backend/prompts/grading.md` | backend worker fallback 批改 prompt（含 `{ocr_review_block}`；**不**含 `{rubric}`） | （文本资源） |
+| `backend/prompts/single_shot.md` | backend worker fallback single-shot prompt | （文本资源） |
 
 ## 三、Provider 接口契约
 
@@ -279,10 +285,11 @@ prompt 模板里的 `{ocr_review_block}` 占位符会被自动替换。对没占
 
 ### 6.5 prompt 占位符 + legacy 迁移
 
-`prompts/grading.md` 用 `{ocr_review_block}` 占位符；vision/text 由 `core/grader.py`
-按当前模式填充。但现网用户 `data/settings.json` 里很可能存着没有占位符的旧
-prompt，所以保留了一段 `_LEGACY_VISION_BLOCK` regex，自动把老的 "重要：OCR 校对说明"
-段升级成动态 block，避免要求用户手动重置 prompt。
+三套 grading.md（`demo/prompts/`、`backend/prompts/`、`web/lib/model-catalog.ts:DEFAULT_PROMPT_GRADING`）
+都用 `{ocr_review_block}` 占位符；vision/text 由 `core/grader.py` 按当前模式填充。
+但现网用户 `data/settings.json` 里很可能存着没有占位符的旧 prompt，所以保留了一段
+`_LEGACY_VISION_BLOCK` regex，自动把老的 "重要：OCR 校对说明" 段升级成动态 block，
+避免要求用户手动重置 prompt。
 
 ## 七、调试 / 烟测建议
 
@@ -328,6 +335,42 @@ PY
 - ❌ 在 `backend/routes/` 里做异步 LLM 调用 —— 路由只负责落库 + 入队列，业务在 worker。
 - ❌ 在 `pyproject.toml` 之外维护依赖 —— `requirements.txt` 是 `uv export` 自动生成的，
   不要手编辑；改依赖只改 `pyproject.toml`，再 `uv lock && uv export ...` 即可。
+
+## 八½、Prompt 模板的三套独立来源
+
+历史上 `prompts/` 在仓库根目录被 demo 和 backend 共用，违反 §零 "demo / backend
+完全独立"原则；2026-05 拆成三套独立来源：
+
+| 来源 | 服务于 | 含 `{rubric}` 占位符？ | 主要 owner |
+| --- | --- | --- | --- |
+| `demo/prompts/{ocr,grading,single_shot}.md` | 模式 A（Gradio 离线） | ❌ 不含 | demo 用户：Gradio "设置" Tab 改完会持久化到 `data/settings.json` |
+| `backend/prompts/{ocr,grading,single_shot}.md` | 模式 B（中台 worker fallback） | ❌ 不含 | 运维：现网 web 总是显式传 `providerOverrides`，这套基本不会被读到 |
+| `web/lib/model-catalog.ts:DEFAULT_PROMPT_*` | 模式 C（web 老师端"重置为推荐模板"按钮） | ✅ 含，由 web 在 POST 给 backend 前替换 | 老师：在 web 设置页可改全局模板 |
+
+加载机制（`core/config.py:Settings.load_prompts(prompts_dir)`）：
+
+- `core/` 不持有任何 prompt 文件路径，`Settings.load()` 只把 `*_prompt` 字段
+  默认成空串。
+- 各入口在 `Settings.load()` 之后**显式**调 `s.load_prompts(自家目录)`：
+  - `demo/app.py:_load_settings()` → `s.load_prompts(DEMO_PROMPTS_DIR)`
+  - `backend/config.py:BackendSettings.load()` → `core.load_prompts(BACKEND_PROMPTS_DIR)`
+- `data/settings.json` 里 user 改过的持久化值 > prompts 目录的默认值（`load_prompts`
+  只填空字段）。
+
+**改 prompt 时三套要同步**——它们对应同一份 `core/schemas.py:GradingResult`，
+跑出来的 LLM 输出 JSON schema 必须一致，不然 demo / backend / web 三条路径任一
+出现 schema 漂移都会引发 GRADING_FAILED。
+
+**不要做的事**：
+
+- ❌ 让 `core/` 重新长出 `PROMPTS_DIR` / `_read_prompt` —— 单向依赖，core 不能
+  知道任何入口的存在。
+- ❌ 在 `demo/prompts/` 或 `backend/prompts/` 写 `{rubric}` —— backend
+  `core/grader.py` 的 `str.replace` 不识别它，会被原样发给 LLM。
+- ❌ 在 `web/lib/model-catalog.ts:DEFAULT_PROMPT_*` 漏掉 `{rubric}` —— web 端
+  settings 保存时会校验报错。
+- ❌ 把 demo / backend / web 任何一套 copy 给另一套 —— 它们三套 owner 不同、
+  可演化方向不同，强行拉齐反而失去拆分意义。
 
 ## 九、模式 B 改代码时的关键约束（2C2G + 3 Mbps）
 
@@ -419,8 +462,10 @@ service `web` 与 `backend` 并列。
 
 - ❌ **不要 import `core/` 或 `backend/`**：根本 import 不到（不在同一 build 里），
   即便用 subprocess 调 python 也别这么做 —— 走 HTTP。
-- ❌ **不要在 `web/` 里复制 `prompts/*.md`**：题目上下文通过 `question_context`
-  字段传过去就行，prompt 模板的 ownership 永远在 backend。
+- ❌ **不要把 `demo/prompts/*.md` 或 `backend/prompts/*.md` 拷进 `web/`**：题目
+  上下文通过 `question_context` 字段传过去就行；web 自己那套 prompt 模板已经在
+  `web/lib/model-catalog.ts:DEFAULT_PROMPT_*`，含 `{rubric}` 占位符，跟 demo /
+  backend 的版本是**三套独立来源**（详见 §八½）。
 - ❌ **不要把 `WEB_PUBLIC_BASE_URL` 设成公网域名**（除非跨机部署）：会触发 hairpin
   陷阱，akapen 拉图会回到自己的公网出向，把 3 Mbps 打爆。详见
   `.cursor/plans/homework-frontend_*.plan.md` §八。
@@ -478,9 +523,41 @@ backend 服务（除非用 `host.docker.internal` 或加上 host 映射）。
 | --- | --- |
 | `core/` / `backend/` python | `uv run ruff check . && uv run pytest` + `uv run python scripts/smoke_api.py`（见 §十） |
 | `web/` ts/tsx | `cd web && npx tsc --noEmit && npm run lint` |
-| `web/prisma/schema.prisma` | `cd web && npx prisma migrate dev --name <短描述>` 生成 migration；不要用 `db push` |
-| `prompts/*.md` | 跑一次 §十 的烟测 1～2，确认 LLM 输出还能 parse |
+| `web/prisma/schema.prisma` | **必须**走 `./web/scripts/migrate.sh --name <短描述>`（详见 §12.2.5）；**不要**直接 `npx prisma migrate dev`；**永远不要**用 `prisma db push` |
+| `demo/prompts/*.md` 或 `backend/prompts/*.md` 或 `web/lib/model-catalog.ts:DEFAULT_PROMPT_*` | 跑一次 §十 的烟测 1～2，确认 LLM 输出还能 parse；改一边时 cross-check 另两边是否要同步（见 §八½） |
 | `Dockerfile` / `docker-compose.yml` | `docker compose config` 看一眼解析后的 yaml |
+
+### 12.2.5 改 `web/prisma/schema.prisma` —— 必须走 `migrate.sh` wrapper
+
+只要动了 prisma schema，**必须**这样跑：
+
+```bash
+./web/scripts/migrate.sh --name <短描述>
+# 例：./web/scripts/migrate.sh --name add_question_difficulty
+```
+
+不要图省事直接 `cd web && npx prisma migrate dev --name xxx`，原因（踩过的坑）：
+
+1. **`web/.env` 里 `DATABASE_URL=file:/app/data/web.db` 是容器内绝对路径**。在
+   宿主机裸跑 prisma 时这个路径不存在，prisma 会**回落到按 `schema.prisma`
+   所在目录解析相对路径**。如果你以为 `file:./data/web.db` 能指到 `web/data/web.db`，
+   实际上它会被解析成 **`web/prisma/data/web.db`** —— 一个全新的 stray DB。
+   migration 应用上去；启动 web 容器后查实际运行 DB 还是老 schema，下次启动
+   `migrate deploy` 跑出冲突。
+2. **不传 `--name` 会进交互模式**询问 migration 名字，agent / CI 跑直接卡死。
+3. **`prisma db push` 不生成 migration 文件**，schema 漂移没有 git 痕迹，
+   ECS 上的 `migrate deploy` 一脸懵。
+
+`migrate.sh` 做的事（30 行 bash，不复杂）：
+
+- 把 `DATABASE_URL` 强制覆盖成 **绝对路径** `file:<repo>/web/data/web.db`
+- 跑前检查 `web/prisma/data/` 是不是已经有 stray DB，有就拒绝执行（要求先
+  `rm -rf` 干净再来）
+- 强制要求 `--name`，避免 agent 卡在交互
+- 完成后打印下一步（重启容器 + git add）
+
+**绝不**修改 `web/.env` 里的 `DATABASE_URL` 来"绕过" wrapper —— 那个值是容器
+运行时用的，不能为了本地 prisma 调试改它，否则 docker compose 起来连不上 DB。
 
 ### 12.3 本地端到端验活（agent 自动跑，用户在浏览器验收）
 
@@ -646,6 +723,9 @@ dcp pull && dcp up -d
 - ❌ ECS 上跑 `docker compose up --build` —— 2C2G 内存不够 next build
 - ❌ 跳过本地验活直接 push
 - ❌ push 后忘记 ssh ECS 跑 `dcp pull && up -d`（`pull_policy: always` 只在 `up` 时拉一次）
+- ❌ 改 `web/prisma/schema.prisma` 后裸跑 `npx prisma migrate dev` —— 必须走
+  `./web/scripts/migrate.sh` wrapper，否则会因为 `web/.env:DATABASE_URL` 是容器
+  路径而把 migration 应用到 stray DB `web/prisma/data/web.db`（详见 §12.2.5）
 
 ## 十三、宿主机持久化 + 备份恢复
 

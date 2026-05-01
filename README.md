@@ -245,24 +245,29 @@ BANDWIDTH_KBPS=200000   # 形同关闭桶
 
 ## API Provider
 
-默认走 **阿里云百炼（DashScope）的 Qwen3-VL**，原因：
+默认走 **阿里云百炼（DashScope）的 Qwen3.6**，原因：
 
 - 国内网络稳，延迟比 Gemini 低很多。
+- Qwen 3.5+ 起主线 plus / flash 已经是多模态（图+视频+文本输入），1M 上下文。
 - 日语手写实测好，对涂改 / 插字 / 划线推理够用。
-- 价格便宜，`qwen3-vl-plus` 比 `gemini-3.1-pro` 便宜 ~5×；用 batch 还能再 5 折。
+- 价格便宜，`qwen3.6-plus` 比 `gemini-3.1-pro-preview` 便宜 ~5×；用 batch 还能再 5 折。
 
-| Provider | 视觉（OCR / 看图批改） | 纯文本（仅批改） | 备注 |
+> ⚠ 阿里云官方明确「`qwen3-vl` 系列已不作为首选推荐，新项目建议使用
+> `qwen3.6` / `qwen3.5` 系列」。本项目的预设已对齐这一点；旧 `qwen3-vl-*` 留作
+> 兼容选项。
+
+| Provider | 推荐（多模态 + 1M 上下文） | 兼容 / 旧版 | 备注 |
 | --- | --- | --- | --- |
-| `qwen`（默认） | `qwen3-vl-plus` / `qwen3-vl-flash` | `qwen3.6-plus` / `qwen3.6-flash` / `qwen3.5-plus` / `qwen3.5-flash` | 阿里云百炼 OpenAI 兼容协议；纯文本模型选了会自动跳过附图 |
-| `gemini` | `gemini-3.1-pro` / `gemini-2.5-pro` / `gemini-2.5-flash` / `gemini-2.5-flash-lite` | — | 海外 |
+| `qwen`（默认） | `qwen3.6-plus` / `qwen3.6-flash` / `qwen3.5-plus` / `qwen3.5-flash` | `qwen3-vl-plus` / `qwen3-vl-flash` | 阿里云百炼 OpenAI 兼容协议；3.5+ 主线 plus/flash 全多模态 |
+| `gemini` | `gemini-3.1-pro-preview` / `gemini-2.5-pro` / `gemini-2.5-flash` / `gemini-2.5-flash-lite` | — | 海外，需科学上网；注意 3.1 真实 API name 带 `-preview` |
 | `claude` | `claude-sonnet-4-5` / `claude-opus-4-5` / `claude-haiku-4-5` | — | 仅批改可选 |
 
-> 百炼上 `qwen3-vl-235b-a22b-instruct/-thinking`、`qwen-vl-max-latest`、`qwen-vl-ocr-latest`
-> 这些不在默认开通范围里，需要单独在「模型广场」申请；申请到之后直接在 UI 模型框
-> 粘贴 ID 即可（dropdown 都开了 `allow_custom_value`）。
+> 百炼上 `qwen3.6-plus-2026-04-02`（版本快照）、`qvq-72b-preview`（视觉推理）、
+> `qwen-vl-ocr-latest` 这些不在默认下拉里，但每个 dropdown 都开了
+> `allow_custom_value`，申请到之后直接粘贴 ID 即可。
 >
-> ⚠ Qwen3-VL 系列**没有 max** 这一档，旗舰就是 `qwen3-vl-plus`；UI 上看到的「Max」
-> 一般是旧 Qwen2-VL 时代的 `qwen-vl-max-latest`，不要混淆。
+> ⚠ 旧 Qwen3-VL 系列**没有 max** 这一档；UI 上看到的「Max」一般是旧 Qwen2-VL
+> 时代的 `qwen-vl-max-latest`，跟当前主线 `qwen3.6-plus` / `qwen3.5-plus` 无关。
 
 申请百炼 Key：<https://bailian.console.aliyun.com/> → API-KEY 管理 → 创建。
 Key 形如 `sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`。
@@ -328,11 +333,11 @@ data/input/
 │   ├── webhook.py          #   HMAC-SHA256 回调（独立队列 + 指数退避 + 死信箱）
 │   ├── token_bucket.py     #   全局上行带宽令牌桶
 │   ├── metrics.py          #   Prometheus 指标定义
-│   └── admin_ui.py         #   只读 Gradio 后台（挂在 /admin）
-├── prompts/
-│   ├── ocr.md              # OCR 默认 prompt
-│   ├── grading.md          # 批改 prompt（要求严格 JSON 输出）
-│   └── single_shot.md      # Single-shot prompt（一次 vision 调用同时返转写+评分）
+│   ├── admin_ui.py         #   只读 Gradio 后台（挂在 /admin）
+│   └── prompts/            #   ⚠ 模式 B 的 fallback prompt（web 没传 override 时才用）
+│       ├── ocr.md
+│       ├── grading.md      #     批改 prompt（含 {ocr_review_block}，不含 {rubric}）
+│       └── single_shot.md  #     Single-shot prompt（一次 vision 同时出转写+评分）
 ├── docs/
 │   └── PLAN_CN_SINGLE_SCHOOL_2C2G.md  # 中台架构说明 / 容量预算（保留作历史参考）
 ├── scripts/
@@ -376,15 +381,15 @@ data/input/
 
 ## 默认模型 & 思考策略
 
-- **OCR**：`qwen3-vl-plus`（百炼 Qwen3-VL 旗舰，~5–10 秒/页）。
+- **OCR**：`qwen3.6-plus`（百炼 Qwen3.6 旗舰，多模态 + 1M 上下文，~5–10 秒/页）。
   非流式 chat 默认不开思考，对应 Gemini 的 `thinking_budget=0`：让 OCR 保持
   「快而傻」—— 原文转写、不主动纠错、看不清的字打 `[?]`。这能避免模型偷偷把
   学生写错的地方"修正"成正确的，导致批改时漏扣分。
-- **批改**：默认同样 `qwen3-vl-plus` + **多模态**。批改模型同时收到 OCR 草稿和
-  **学生原图**，会先看图核对 OCR、补全 `[?]`、剔除印刷干扰，再依据校对后的文本评分。
-  想省钱可换 `qwen3.6-plus`/`qwen3.5-plus` 等纯文本模型（自动不附图、只读 OCR 草稿）；
-  想要更强推理可申请 `qwen3-vl-235b-a22b-thinking`，或切到 `claude-sonnet-4-5` /
-  `gemini-3.1-pro`。
+- **批改**：默认同样 `qwen3.6-plus` + **single-shot**——一次 vision 调用同时
+  返回转写 + 评分，省一半带宽 + 一半延迟。
+  想省钱可换 `qwen3.6-flash` / `qwen3.5-flash`（同样多模态，但更便宜更快）；
+  想要更强推理可切到 `gemini-3.1-pro-preview` / `claude-sonnet-4-5`，或在
+  Qwen 3.6 上把 `grading_thinking` 打开（plus / flash 都支持运行时开思考）。
 
 ## 图片预处理
 

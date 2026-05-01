@@ -120,49 +120,6 @@ export function SettingsForm({ initial }: { initial: WebSettingsView }) {
         </CardContent>
       </Card>
 
-      {/* ────── 主区：批改 prompt ────── */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">批改提示词模板</CardTitle>
-          <p className="text-xs text-muted-foreground">
-            这里写**评分流程、输出格式、评语风格**等所有题共用的部分；每道题的具体满分 /
-            给分点请去题目页填「评分细则」。提示词中必须保留{" "}
-            <code className="rounded bg-muted px-1 font-mono text-[11px]">
-              {RUBRIC_PLACEHOLDER}
-            </code>{" "}
-            占位符，批改时会自动把当前题的评分细则填进来。
-          </p>
-        </CardHeader>
-        <CardContent>
-          <PromptField
-            label={
-              gradingIsVision
-                ? "看图直接评分（视觉模型一次过）"
-                : "看转写后的文字评分（文本模型两步批改）"
-            }
-            value={
-              gradingIsVision ? s.singleShotPrompt : s.gradingPrompt
-            }
-            onChange={(v) =>
-              update(
-                gradingIsVision ? "singleShotPrompt" : "gradingPrompt",
-                v,
-              )
-            }
-            rows={10}
-            requireRubric
-            onReset={() => {
-              if (gradingIsVision) {
-                update("singleShotPrompt", DEFAULT_PROMPT_SINGLE_SHOT);
-              } else {
-                update("gradingPrompt", DEFAULT_PROMPT_GRADING);
-              }
-              toast.success("已重置为推荐模板（含 {rubric} 占位符）");
-            }}
-          />
-        </CardContent>
-      </Card>
-
       {/* ────── 高级 ────── */}
       <Card>
         <CardHeader className="cursor-pointer select-none" onClick={() => setAdvancedOpen((v) => !v)}>
@@ -227,30 +184,86 @@ export function SettingsForm({ initial }: { initial: WebSettingsView }) {
               />
             </div>
 
-            {/* 视觉模型也保留两步模式的 prompt（手动想用 OCR + 批改两步时用） */}
-            {gradingIsVision ? (
-              <details className="rounded-md border p-3">
-                <summary className="cursor-pointer text-sm font-medium">
-                  两步批改提示词（少数老师才用）
-                </summary>
-                <p className="mt-2 mb-3 text-xs text-muted-foreground">
-                  当前用的是视觉模型一次过的方式，不会用到这条；保留是为了切到文本模型两步批改时不丢配置。
-                </p>
-                <PromptField
-                  label="批改提示词（两步批改）"
-                  value={s.gradingPrompt}
-                  onChange={(v) => update("gradingPrompt", v)}
-                  rows={6}
-                  requireRubric
-                  onReset={() => {
-                    update("gradingPrompt", DEFAULT_PROMPT_GRADING);
-                    toast.success("已重置");
-                  }}
-                />
-              </details>
-            ) : null}
           </CardContent>
         ) : null}
+      </Card>
+
+      {/* ────── 全局批改提示词模板（页面最下，次要） ────── */}
+      {/*
+        把模板沉到最底，是因为它是个"通用框架 + JSON schema"，绝大多数老师不需要动；
+        题型相关的内容（"满分多少"、"哪些扣分"、"标准答案是什么"）应该全部写在每道题的
+        「评分要求」里——同一份模板就能跑作文 / 续写 / 默写 / 选择 / 填空 / 计算。
+        老用户如果模板里还有作文专属字眼（"段落"、"跑题"、"立意"…），点「重置为推荐模板」
+        就能升到最新的通用版本。
+      */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            全局批改提示词模板{" "}
+            <span className="text-xs font-normal text-muted-foreground">
+              · 通用框架（一般不用改）
+            </span>
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            这是一份**对所有题型通用的框架**：写明 LLM 的角色 / 输出 JSON schema / 通用约束，**不应该**包含任何题型专属内容（什么满分、哪些扣分、标准答案是什么…那些请写到每道题的「评分要求」里）。
+            <br />
+            如果你的模板里还有「保留段落」「跑题」「立意」「字数」这类作文专属字眼，建议点「重置为推荐模板」更新到最新通用版本。
+            <br />
+            模板必须保留{" "}
+            <code className="rounded bg-muted px-1 font-mono text-[11px]">
+              {RUBRIC_PLACEHOLDER}
+            </code>{" "}
+            占位符，批改时自动把当前题的评分要求填进来。
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <PromptField
+            label={
+              gradingIsVision
+                ? "看图直接评分（视觉模型一次过）· 当前在用"
+                : "看转写后的文字评分（文本模型两步批改）· 当前在用"
+            }
+            value={gradingIsVision ? s.singleShotPrompt : s.gradingPrompt}
+            onChange={(v) =>
+              update(
+                gradingIsVision ? "singleShotPrompt" : "gradingPrompt",
+                v,
+              )
+            }
+            rows={10}
+            requireRubric
+            onReset={() => {
+              if (gradingIsVision) {
+                update("singleShotPrompt", DEFAULT_PROMPT_SINGLE_SHOT);
+              } else {
+                update("gradingPrompt", DEFAULT_PROMPT_GRADING);
+              }
+              toast.success("已重置为推荐模板（通用框架，不含题型字眼）");
+            }}
+          />
+          {/* 视觉模型也保留两步模式的 prompt（手动想用 OCR + 批改两步时用） */}
+          {gradingIsVision ? (
+            <details className="rounded-md border p-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                两步批改提示词（视觉模型用不到，备用）
+              </summary>
+              <p className="mt-2 mb-3 text-xs text-muted-foreground">
+                当前用的是视觉模型一次过；保留这份是为了切到文本模型两步批改时不丢配置。
+              </p>
+              <PromptField
+                label="批改提示词（两步批改）"
+                value={s.gradingPrompt}
+                onChange={(v) => update("gradingPrompt", v)}
+                rows={6}
+                requireRubric
+                onReset={() => {
+                  update("gradingPrompt", DEFAULT_PROMPT_GRADING);
+                  toast.success("已重置");
+                }}
+              />
+            </details>
+          ) : null}
+        </CardContent>
       </Card>
 
       {/* ────── 操作栏 ────── */}
@@ -350,11 +363,11 @@ function ModelSelector({
             <Input
               value={current.model}
               onChange={(e) => onPick({ provider: current.provider, model: e.target.value })}
-              placeholder="e.g. qwen3-vl-plus-2025-09-23"
+              placeholder="e.g. qwen3.6-plus-2026-04-02"
             />
           </div>
           <p className="col-span-2 text-xs text-muted-foreground">
-            粘贴自定义模型 ID（如 <code>qwen3-vl-plus-2025-09-23</code>）。
+            粘贴自定义模型 ID（如 <code>qwen3.6-plus-2026-04-02</code>）。
             需要后台已经开通对应模型才能跑通；不确定可以先点上面「测试服务连接」。
           </p>
         </div>

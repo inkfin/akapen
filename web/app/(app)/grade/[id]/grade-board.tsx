@@ -31,10 +31,16 @@ function describeCell(c: CellState): CellLabel {
   const t = c.latest;
   // 满分以 LLM 真实输出的 max_score 为准（每题 rubric 不同 → max 不同）。
   // 还没拿到（任务跑挂 / 老数据）就只显示 finalScore，不再有占位满分。
+  // finalScore=null 且 status=succeeded → "只批注"模式（题目没填 rubric）：
+  // 模型只给修改建议，没分数。徽章用 info 蓝色和"已批注"文案区分于普通"已批"。
   switch (t.status) {
     case "succeeded": {
       if (t.finalScore === null) {
-        return { text: "已批", variant: "success", pending: false };
+        return {
+          text: t.reviewFlag ? "已批注 ⚠" : "已批注",
+          variant: t.reviewFlag ? "warning" : "info",
+          pending: false,
+        };
       }
       const text = t.maxScore
         ? `${t.finalScore}/${t.maxScore}`

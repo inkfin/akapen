@@ -1,4 +1,4 @@
-# 让构建上下文尽量小：业务只关心 core/ backend/ prompts/ app.py + requirements.txt
+# 让构建上下文尽量小：业务只关心 core/ + backend/（含 backend/prompts/） + requirements.txt
 # 千万别把 data/ 或 dataset/ 拷进镜像 —— 那是宿主机持久化数据 / 测试图片
 
 # Python / venv

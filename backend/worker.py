@@ -334,7 +334,7 @@ class Worker:
         # prompt / thinking 优先用 overrides
         prompt = ov.get("single_shot_prompt") or s.single_shot_prompt
         if not prompt.strip():
-            raise GradingError("single_shot_prompt 为空（检查 prompts/single_shot.md）")
+            raise GradingError("single_shot_prompt 为空（检查 backend/prompts/single_shot.md）")
         thinking = ov.get("grading_thinking")
         if thinking is None:
             thinking = s.grading_thinking

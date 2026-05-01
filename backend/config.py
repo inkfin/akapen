@@ -23,6 +23,12 @@ from core.config import DATA_DIR, Settings
 
 logger = logging.getLogger("backend.config")
 
+# backend 模式专属的 prompt fallback。core/ 不持有 prompt 文件路径
+# （详见 core.config.Settings.load_prompts docstring），各入口自带自己一份。
+# 现网 web 总是显式传 providerOverrides.{ocr,grading,single_shot}_prompt，
+# 因此这套 fallback 只在 web 端清空了模板才会被读到。
+BACKEND_PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+
 
 @dataclass
 class BackendSettings:
@@ -65,6 +71,7 @@ class BackendSettings:
         - ``API_KEYS`` 格式错（缺 ``:`` / 重复 secret） → 抛 ``RuntimeError``。
         """
         core = Settings.load()
+        core.load_prompts(BACKEND_PROMPTS_DIR)
         api_keys = _parse_api_keys(os.getenv("API_KEYS", ""))
         if not api_keys:
             raise RuntimeError(

@@ -364,7 +364,7 @@ async def save_grading_result(
         (
             transcription,
             grading.model_dump_json(),
-            float(grading.final_score),
+            float(grading.final_score) if grading.final_score is not None else None,
             float(grading.confidence),
             int(grading.review_flag),
             json.dumps(grading.review_reasons, ensure_ascii=False),

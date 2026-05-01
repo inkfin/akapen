@@ -81,11 +81,13 @@ model Question {
   index   Int // 第几题，UI 排序 + 学生上传时选择
   prompt  String // 题干，会作为 question_context 送 akapen
 
-  /// 本题的评分细则（**必填**）：满分多少、给分点、扣分项。
-  /// 全局 grading prompt 模板里的 `{rubric}` 占位符会被替换成这段文字。
-  /// 不再需要 maxScore 字段——满分写在 rubric 里就行（"本题满分 30 分"），
-  /// LLM 实际用的 max 来自 GradingTask.maxScore（`result.max_score`）。
-  rubric String
+  /// 本题的评分细则：满分多少、给分点、扣分项。
+  /// **留空** = "只批注"模式：LLM 只读题干 + 学生答题 → 只输出修改建议（feedback），
+  /// 不打分。适合开放作文 / 写作辅导这类没有标准答案的题。
+  /// **非空** = 正常打分：全局 grading prompt 模板里的 `{rubric}` 占位符
+  /// 会被替换成这段文字；满分由 LLM 根据 rubric 字面识别（"本题满分 30 分"），
+  /// 实际用的 max 回填到 GradingTask.maxScore。
+  rubric String?
 
   /// 高级：单题自定义"批改 prompt（两步模式）"。
   /// 留 NULL = 用 WebSettings 的全局 gradingPrompt（替换 {rubric} 后送 LLM）；
@@ -133,19 +135,20 @@ model WebSettings {
   userId String @unique
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // 批改主路径
+  // 批改主路径。default 跟 web/lib/actions/settings.ts:FALLBACK 保持一致。
+  // Qwen 3.5+ 主线 plus/flash/max 默认就是多模态（详见 core/providers/qwen.py:is_vision_model）。
   gradingProvider   String  @default("qwen")
-  gradingModel      String  @default("qwen3-vl-plus")
+  gradingModel      String  @default("qwen3.6-plus")
   enableSingleShot  Boolean @default(true)
   gradingWithImage  Boolean @default(true)
   gradingThinking   Boolean @default(false)
 
   // OCR 路径（two-step 模式才用得到）
   ocrProvider String @default("qwen")
-  ocrModel    String @default("qwen3-vl-plus")
+  ocrModel    String @default("qwen3.6-plus")
 
   // Prompts —— 留 NULL 意味"用 backend 默认"，这样老师不填的字段会 fallback
-  // 到 prompts/*.md。前端上限 16K（与 backend ProviderOverrides 一致）。
+  // 到 backend/prompts/*.md。前端上限 16K（与 backend ProviderOverrides 一致）。
   ocrPrompt        String?
   gradingPrompt    String?
   singleShotPrompt String?

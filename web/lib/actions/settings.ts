@@ -77,20 +77,23 @@ export type UpdateWebSettingsInput = z.infer<typeof updateSchema>;
 
 // 用户从未配置过时给的默认值。
 //
-// 关键：prompt 字段**预填**了 schema-correct 的中文作文模板（见 model-catalog.ts），
-// 而不是空串 —— 因为 backend `prompts/single_shot.md` 里的「扣分项 max=0」与
-// `core/schemas.py:DimensionScore.max>0` 互相矛盾，prompt 直接落到 backend 默认会
-// 触发校验失败。预填模板让老师开箱可用；想改的话进设置页编辑就行。
+// 关键：prompt 字段**预填**了 schema-correct 的通用模板（见 model-catalog.ts），
+// 而不是空串 —— 因为 backend `backend/prompts/single_shot.md` 里的某些字段约束
+// （如「扣分项 max=0」）与 `core/schemas.py:DimensionScore.max>0` 互相矛盾，prompt
+// 直接落到 backend 默认可能触发校验失败。预填模板让老师开箱可用；想改的话进
+// 设置页编辑就行。
 //
-// 用户清空某栏 + 保存 = 存 NULL → 跑批改时 backend 退回 prompts/*.md 默认。
+// 用户清空某栏 + 保存 = 存 NULL → 跑批改时 backend 退回 `backend/prompts/*.md`
+// 默认。注意 backend 那套 fallback 跟这里 model-catalog 的 DEFAULT_PROMPT_*
+// 是**两个独立来源**，详见 `core/config.py:Settings.load_prompts` docstring。
 const FALLBACK: WebSettingsView = {
   gradingProvider: "qwen",
-  gradingModel: "qwen3-vl-plus",
+  gradingModel: "qwen3.6-plus",
   enableSingleShot: true,
   gradingWithImage: true,
   gradingThinking: false,
   ocrProvider: "qwen",
-  ocrModel: "qwen3-vl-plus",
+  ocrModel: "qwen3.6-plus",
   ocrPrompt: DEFAULT_PROMPT_OCR,
   gradingPrompt: DEFAULT_PROMPT_GRADING,
   singleShotPrompt: DEFAULT_PROMPT_SINGLE_SHOT,

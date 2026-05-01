@@ -48,12 +48,24 @@ class GradingResult(BaseModel):
     - 模型给出初判 ``confidence``；
     - ``core/grader.py`` 的后处理会再根据"边界分数 / 必填字段缺失 / 评语情绪"
       调高 ``review_flag``。
+
+    "不打分"模式（前端 Question.rubric 为空时）：``final_score`` / ``max_score`` /
+    ``dimension_scores`` 全为 None / 空，``feedback`` 仍然是老师要看的核心 ——
+    用于"只批注 / 给修改建议"的题型（开放作文、写作辅导等）。
+    业务层（`_apply_quality_gates`）和后端持久化层（`backend/repo.py`、admin UI）
+    都对 None 做了兜底，None 本身不视为错误。
     """
 
     model_config = ConfigDict(extra="ignore")
 
-    final_score: float = Field(ge=0, le=100, description="总分（按 max_score 满分计）")
-    max_score: float = Field(default=30, gt=0, le=100, description="满分基准（高考日语作文 30）")
+    final_score: float | None = Field(
+        default=None, ge=0, le=100,
+        description="总分（按 max_score 满分计）；不打分模式留 null",
+    )
+    max_score: float | None = Field(
+        default=None, gt=0, le=100,
+        description="满分基准；不打分模式留 null",
+    )
     dimension_scores: list[DimensionScore] = Field(default_factory=list)
     feedback: str = Field(default="", description="老师面向学生的整体评语，markdown 允许")
     confidence: float = Field(
@@ -67,8 +79,14 @@ class GradingResult(BaseModel):
         default_factory=list,
         description="复核理由（如 'low_confidence' / 'boundary_score' / 'missing_evidence'）",
     )
-    rubric_id: str = Field(default="jp-essay-30", description="评分规则 id")
-    rubric_version: str = Field(default="v1", description="评分规则版本")
+    # rubric_id / rubric_version 来自 LLM 输出。新版（c5a8074 起）走"每题独立 rubric"，
+    # 全局 id/version 已无业务意义；前端 prompt 明确告诉模型这俩字段"可空 / 留 null"，
+    # 所以 schema 必须接受 None —— pydantic 的 `default=` 只在 key 缺失时生效，
+    # 当 LLM 显式返回 null 时仍会触发 `string_type` 校验失败，导致整批 GRADING_FAILED。
+    # 真正用于落库 / API 响应的 rubric_id/version 走 backend.TaskCreate / TaskStatus 那条
+    # 路径（同样是 `str | None`），与本字段无关。
+    rubric_id: str | None = Field(default=None, description="评分规则 id（可空）")
+    rubric_version: str | None = Field(default=None, description="评分规则版本（可空）")
     transcription: str = Field(
         default="",
         description="vision 模式批改时，模型校对后的作文最终文本；text 模式留空",

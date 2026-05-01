@@ -86,7 +86,10 @@ class Provider(ABC):
     def is_vision_model(self, model: str) -> bool:
         """这个 model 是否能读图。默认 ``True``——大多数我们选的 model 都是多模态。
 
-        Qwen 上有纯文本系列（``qwen3.6-plus`` 等），需要在子类里覆盖。
+        Qwen 端有少数纯文本系列（``qwen-turbo`` / ``qwen3-coder-*`` /
+        ``qwen2.5-72b-instruct`` 等），由 :class:`core.providers.qwen.QwenProvider`
+        覆盖识别；现网主推的 ``qwen3.6-plus`` / ``qwen3.5-plus`` 等 plus/flash/max
+        档**都是多模态**。
         """
         return True
 

@@ -20,9 +20,10 @@ RUN pip install -r /app/requirements.txt
 # ---- 业务代码 ---- #
 # 注意：data/ 不进镜像；运行时由 volume 挂上来。
 # demo/ 是离线 Gradio 入口，本镜像只跑中台 backend，所以不 COPY 进来。
+# backend/ 已经把 backend/prompts/ 自带，core/ 不再持有任何 prompt 路径
+# （详见 core/config.py:Settings.load_prompts docstring）。
 COPY core /app/core
 COPY backend /app/backend
-COPY prompts /app/prompts
 
 # ---- 非 root 用户 ---- #
 # 默认 uid/gid = 1000，与大多数 Linux 桌面用户一致；Mac docker desktop 透明处理。

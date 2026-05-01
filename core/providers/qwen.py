@@ -42,9 +42,36 @@ class QwenProvider(Provider):
         )
 
     def is_vision_model(self, model: str) -> bool:
-        """``-vl-*`` / ``-omni-*`` / ``qvq*`` 才能看图，其他都按纯文本处理。"""
+        """判断 Qwen model 是否能看图。
+
+        覆盖三类：
+
+        1. 旧版 VL / Omni / QvQ —— 靠后缀显式标记的视觉模型
+           （如 ``qwen3-vl-plus``、``qwen-omni-turbo``、``qvq-*``）
+        2. **Qwen3.5+ 主线（plus / flash / max）** —— 阿里云从 3.5 起把视觉能力
+           整合进主线，不再用 ``-vl-`` 后缀；plus / flash / max 三档默认全多模态
+           （文本 + 图像 + 视频输入）。
+           官方文档：https://www.alibabacloud.com/help/zh/model-studio/vision-model
+        3. 其他都当纯文本（``-coder-*`` / ``qwen-turbo`` / 老 ``qwen-max`` 不带版本号 等）
+
+        正则匹配 ``qwen<major>.<minor>-(plus|flash|max)``，要求版本号 ≥ 3.5：
+
+        - ``qwen3.6-plus`` → True
+        - ``qwen3.6-plus-2026-04-02`` → True（接受快照后缀）
+        - ``qwen3.5-flash`` → True
+        - ``qwen3.6-coder`` → False（不是 plus/flash/max）
+        - ``qwen-plus``     → False（没小版本号，兜底当老纯文本）
+        """
         m = model.lower()
-        return "-vl" in m or "-omni" in m or m.startswith("qvq")
+        if "-vl" in m or "-omni" in m or m.startswith("qvq"):
+            return True
+        import re
+        match = re.match(r"qwen(\d+)\.(\d+)-(plus|flash|max)\b", m)
+        if match:
+            major, minor = int(match.group(1)), int(match.group(2))
+            if (major, minor) >= (3, 5):
+                return True
+        return False
 
     def supports_thinking_toggle(self, model: str) -> bool:
         """``-plus`` / ``-flash`` 系列支持 ``enable_thinking``，固定模式模型不支持。"""

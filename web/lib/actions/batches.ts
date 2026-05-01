@@ -53,8 +53,9 @@ export async function deleteBatchAction(formData: FormData) {
   redirect("/batches");
 }
 
-// 题目层评分细则 —— 必填。老师必须为每题填一段自然语言的"满分多少 / 给分点"，
-// 全局 prompt 模板里的 {rubric} 占位符会被替换成这段。
+// 题目层评分细则。
+// - 填了 = 正常打分模式：全局 prompt 里的 {rubric} 占位符替换成这段。
+// - 留空 = "只批注"模式：模型只输出修改建议，不打分；UI 不显示分数列。
 //
 // customGradingPrompt / customSingleShotPrompt 是高级口子：填了就**整段覆盖**
 // 全局 prompt（不再走 {rubric} 替换），适合题型与全局模板差异大的场景。
@@ -64,11 +65,7 @@ const questionCreate = z.object({
   batchId: z.string().min(1),
   index: z.coerce.number().int().min(1).max(99),
   prompt: z.string().min(1).max(4000),
-  rubric: z
-    .string()
-    .trim()
-    .min(4, "评分细则太短：至少写出本题满分和给分点")
-    .max(4000),
+  rubric: optionalText(4000),
   customGradingPrompt: optionalText(16000),
   customSingleShotPrompt: optionalText(16000),
 });
@@ -92,7 +89,7 @@ export async function upsertQuestionAction(
 
   const data = {
     prompt: parsed.data.prompt.trim(),
-    rubric: parsed.data.rubric.trim(),
+    rubric: parsed.data.rubric.trim() || null,
     customGradingPrompt: parsed.data.customGradingPrompt.trim() || null,
     customSingleShotPrompt: parsed.data.customSingleShotPrompt.trim() || null,
   };

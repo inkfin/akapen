@@ -191,5 +191,6 @@ data/
 为了让前端（`web/`）能在「按题批改」时把题干 / 评分要点送进来，
 `TaskCreateRequestJSON` / multipart Form 新增可选字段 `question_context`（≤4000 字）。
 `grading_tasks` 表用 `_apply_v2()` 增列；`core.grader._prepend_question_context`
-把 ctx 拼到 prompt 顶部（不改 `prompts/grading.md` / `prompts/single_shot.md`，
-现网部署热升级时无需重置 settings）。老用户不传该字段 → 行为完全等价于 v1。
+把 ctx 拼到 prompt 顶部（不改 `demo/prompts/` / `backend/prompts/` 下的 `grading.md`
+和 `single_shot.md`，现网部署热升级时无需重置 settings）。老用户不传该字段 → 行为
+完全等价于 v1。

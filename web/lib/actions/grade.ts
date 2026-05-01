@@ -14,7 +14,7 @@ import {
 } from "@/lib/akapen";
 import { buildSignedImageUrl } from "@/lib/hmac";
 import { getWebSettings, type WebSettingsView } from "@/lib/actions/settings";
-import { substituteRubric } from "@/lib/model-catalog";
+import { isNoGradingQuestion, substituteRubric } from "@/lib/model-catalog";
 
 /**
  * 把用户的 WebSettings + 单道题目的 rubric / customPrompt 拼成 ProviderOverrides。
@@ -22,16 +22,17 @@ import { substituteRubric } from "@/lib/model-catalog";
  * 三层 prompt 决策（优先级从高到低）：
  *   1. question.customSingleShotPrompt / customGradingPrompt → 整段覆盖，不再注入 rubric
  *   2. WebSettings.singleShotPrompt / gradingPrompt （含 {rubric} 占位符）→
- *      用 question.rubric 替换占位符
- *   3. 都为空 → 不传 prompt 字段，backend 用自己 prompts/*.md 默认（不推荐：
- *      backend 默认 prompt 没有 rubric 概念，所有题目按一刀切的 100 分作文打分）
+ *      用 question.rubric 替换占位符；rubric 为空时切到"只批注 / 不打分"指令
+ *   3. 都为空 → 不传 prompt 字段，backend 用自己 backend/prompts/*.md 默认
+ *      （不推荐：backend 默认 prompt 没有 rubric 概念，所有题目按一刀切的
+ *      100 分作文打分）
  *
  * 「前端配置 / 后端只服务」边界：backend 不读 data/settings.json，所有
  * 决策都在 web 这边敲定，传 finalize 的 prompt 过去即可。
  */
 function buildProviderOverridesForQuestion(
   s: WebSettingsView,
-  question: { rubric: string; customGradingPrompt: string | null; customSingleShotPrompt: string | null },
+  question: { rubric: string | null; customGradingPrompt: string | null; customSingleShotPrompt: string | null },
 ): AkapenCreateTaskInput["providerOverrides"] {
   // single-shot prompt：custom > settings.singleShotPrompt 替换 rubric > 不传
   const singleShotPrompt = question.customSingleShotPrompt
@@ -155,10 +156,13 @@ export async function gradeSubmissionsAction(
         sub.question,
       );
 
-      // 拼 question_context：题干 + 评分细则
+      // 拼 question_context：题干（+ 评分细则，如果有）
       // 注意：rubric 已经塞进 prompt 模板了，question_context 这里再带一份是
       // 给 backend 在 prompt 顶部额外提示用的，让模型对题目背景多一份认知。
-      const ctx = `${sub.question.prompt}\n\n本题评分细则：\n${sub.question.rubric}`;
+      // "只批注"模式（rubric 为空）下不重复带评分细则段，避免 prompt 自相矛盾。
+      const ctx = isNoGradingQuestion(sub.question.rubric)
+        ? sub.question.prompt
+        : `${sub.question.prompt}\n\n本题评分细则：\n${sub.question.rubric}`;
 
       const akapenRes = await createGradingTask({
         studentId: sub.student.externalId,

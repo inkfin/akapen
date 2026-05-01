@@ -67,7 +67,7 @@ def build_admin_ui(state: "AppState") -> gr.Blocks:
                 t.student_id,
                 t.student_name,
                 t.image_count,
-                round(t.result.final_score, 1) if t.result else None,
+                round(t.result.final_score, 1) if (t.result and t.result.final_score is not None) else None,
                 round(t.result.confidence, 2) if t.result else None,
                 "✓" if (t.result and t.result.review_flag) else "",
                 t.created_at.isoformat() if t.created_at else "",
@@ -98,9 +98,12 @@ def build_admin_ui(state: "AppState") -> gr.Blocks:
         if t.error:
             md_lines.append(f"\n**❌ 错误**: `{t.error.code}` — {t.error.message[:300]}")
         if t.result:
+            if t.result.final_score is not None:
+                score_line = f"\n**评分**: {t.result.final_score}/{t.result.max_score or '?'} | "
+            else:
+                score_line = "\n**评分**: 不打分（只批注）| "
             md_lines.append(
-                f"\n**评分**: {t.result.final_score}/{t.result.max_score} | "
-                f"confidence={t.result.confidence:.2f} | review={t.result.review_flag}"
+                f"{score_line}confidence={t.result.confidence:.2f} | review={t.result.review_flag}"
             )
             if t.result.review_reasons:
                 md_lines.append(f"**复核理由**: {', '.join(t.result.review_reasons)}")

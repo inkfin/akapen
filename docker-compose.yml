@@ -30,8 +30,10 @@ services:
     volumes:
       # SQLite (grading.db) + uploads/ + logs/ + records/ 全部挂回宿主机
       - ./data:/app/data
-      # 想热更 prompts 而不重新打镜像，把下面这行解开就行（容器内文件随宿主同步）
-      # - ./prompts:/app/prompts:ro
+      # 想热更 backend fallback prompts 而不重新打镜像，把下面这行解开
+      # （容器内文件随宿主同步；现网 web 一般会传 providerOverrides，这套 fallback
+      #  其实很少被读到——详见 AGENTS.md §八½）
+      # - ./backend/prompts:/app/backend/prompts:ro
     healthcheck:
       test:
         - CMD

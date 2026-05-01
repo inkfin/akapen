@@ -24,7 +24,6 @@ import gradio as gr
 from core.config import (
     GRADING_PROVIDERS,
     OCR_PROVIDERS,
-    PROMPTS_DIR,
     Settings,
     models_for,
 )
@@ -38,6 +37,21 @@ from .storage import StudentRecord, extract_score, make_key
 
 logger = setup_logging()
 
+# demo 模式专属的 prompt 默认值。core/ 不再持有任何 prompt 文件路径
+# （详见 core.config.Settings.load_prompts docstring），各入口自带自己一份。
+DEMO_PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+
+
+def _load_settings() -> Settings:
+    """demo 路径加载 Settings：core 加载基础字段 + 本目录的 prompts/。
+
+    设计：包了一层是为了避免 demo 里到处散落 ``Settings.load() + load_prompts()``
+    重复两行，统一在这里 inject demo 专属的 prompt 路径。
+    """
+    s = Settings.load()
+    s.load_prompts(DEMO_PROMPTS_DIR)
+    return s
+
 
 # ---------- 设置 / 扫描 ---------- #
 
@@ -49,7 +63,7 @@ def save_settings(
     ocr_concurrency, grading_concurrency,
     ocr_timeout, grading_timeout, max_attempts,
 ):
-    s = Settings.load()
+    s = _load_settings()
     s.gemini_api_key = gemini_key.strip()
     s.anthropic_api_key = anthropic_key.strip()
     s.dashscope_api_key = dashscope_key.strip()
@@ -76,8 +90,8 @@ def save_settings(
 
 
 def reset_prompts():
-    ocr = (PROMPTS_DIR / "ocr.md").read_text(encoding="utf-8")
-    grading = (PROMPTS_DIR / "grading.md").read_text(encoding="utf-8")
+    ocr = (DEMO_PROMPTS_DIR / "ocr.md").read_text(encoding="utf-8")
+    grading = (DEMO_PROMPTS_DIR / "grading.md").read_text(encoding="utf-8")
     return ocr, grading
 
 
@@ -177,7 +191,7 @@ def _process_batch(targets, *, work_fn, label, workers, progress):
 
 
 def run_ocr_batch(selected_keys, progress=gr.Progress(track_tqdm=False)):
-    s = Settings.load()
+    s = _load_settings()
     records = [r for r in StudentRecord.load_all() if r.existing_image_paths()]
     targets = _resolve_targets(
         records, selected_keys,
@@ -219,7 +233,7 @@ def run_ocr_batch(selected_keys, progress=gr.Progress(track_tqdm=False)):
 
 
 def run_grading_batch(selected_keys, progress=gr.Progress(track_tqdm=False)):
-    s = Settings.load()
+    s = _load_settings()
     records = StudentRecord.load_all()
     targets = _resolve_targets(
         records, selected_keys,
@@ -463,7 +477,7 @@ def load_student(choice: str):
 
 
 def rerun_ocr_one(choice: str):
-    s = Settings.load()
+    s = _load_settings()
     key = _key_from_choice(choice)
     rec = StudentRecord.load(key)
     if rec is None:
@@ -491,7 +505,7 @@ def rerun_ocr_one(choice: str):
 
 
 def rerun_grading_one(choice: str, edited_text: str):
-    s = Settings.load()
+    s = _load_settings()
     key = _key_from_choice(choice)
     rec = StudentRecord.load(key)
     if rec is None:
@@ -606,7 +620,7 @@ def view_student_detail(choice: str):
 # ---------- UI ---------- #
 
 def build_ui() -> gr.Blocks:
-    s = Settings.load()
+    s = _load_settings()
 
     with gr.Blocks(title="日语作文批改 Demo") as demo:
         gr.Markdown(
@@ -632,12 +646,13 @@ def build_ui() -> gr.Blocks:
 
             gr.Markdown(
                 "### Provider & 模型（选 provider 后模型下拉会自动跟着切）\n"
-                "- **OCR**：默认 `qwen3-vl-plus`（百炼 Qwen3-VL 旗舰，日语手写实测稳），"
-                "省钱选 `qwen3-vl-flash`。OCR 必须用视觉模型。\n"
-                "- **批改**：默认同 OCR，可对照原图二次复核；想省钱可以选 `qwen3.6-plus` "
-                "等纯文本模型，会自动跳过附图、只读 OCR 草稿。\n"
-                "- 模型框是「可输入下拉」：百炼上单独申请到的快照 / `qwen3-vl-235b-a22b-*` / "
-                "`qwen-vl-max-latest` 等都可以直接粘贴 ID。"
+                "- **OCR**：默认 `qwen3.6-plus`（百炼 Qwen3.6 旗舰，多模态、1M 上下文），"
+                "省钱选 `qwen3.6-flash` 或 `qwen3.5-flash`。OCR 必须用视觉 / 多模态模型。\n"
+                "- **批改**：默认同 OCR，single-shot 一次调用同时出转写+评分。\n"
+                "  - Qwen 3.5+ 主线 plus/flash/max 都是多模态，无需"
+                "再单独配 OCR 模型；旧 `qwen3-vl-*` 留作兼容。\n"
+                "- 模型框是「可输入下拉」：百炼上单独申请到的快照（如 "
+                "`qwen3.6-plus-2026-04-02`）/ `qvq-72b-preview` 等都可以直接粘贴 ID。"
             )
             with gr.Row():
                 ocr_provider = gr.Dropdown(
