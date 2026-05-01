@@ -71,6 +71,7 @@ export const GRADING_MODELS: ModelOption[] = [
     provider: "gemini",
     model: "gemini-2.5-pro",
     vision: true,
+    note: "Gemini 上一代旗舰，质量稳定。3.1 不可用时的备选。",
   },
   {
     id: "gemini-2-5-flash",
@@ -78,9 +79,9 @@ export const GRADING_MODELS: ModelOption[] = [
     provider: "gemini",
     model: "gemini-2.5-flash",
     vision: true,
-    note: "Gemini 的 flash 档，速度快价格低，适合批量。",
+    note: "Gemini 的 flash 档，速度快、价格低，适合批量批改。",
   },
-  // 纯文本模型 ── 选了之后 backend 自动走「OCR + 批改」两步
+  // 纯文本模型 ── 选了之后会走「先 OCR 转文字、再批改」的两步流程
   {
     id: "qwen-text-plus",
     label: "Qwen · qwen3.6-plus（纯文本）",
@@ -95,6 +96,7 @@ export const GRADING_MODELS: ModelOption[] = [
     provider: "qwen",
     model: "qwen3.6-flash",
     vision: false,
+    note: "纯文本 flash 档，更快更便宜；同样需要先 OCR 转文字再批改。",
   },
 ];
 
@@ -110,6 +112,7 @@ export const OCR_MODELS: ModelOption[] = [
     model: "qwen3-vl-plus",
     vision: true,
     recommended: true,
+    note: "默认转写模型，手写体识别准确度最高。",
   },
   {
     id: "qwen-vl-flash-ocr",
@@ -117,7 +120,7 @@ export const OCR_MODELS: ModelOption[] = [
     provider: "qwen",
     model: "qwen3-vl-flash",
     vision: true,
-    note: "更便宜，作转写够用。",
+    note: "更便宜更快，作单纯文字转写够用；字迹潦草时建议换回 plus。",
   },
   {
     id: "gemini-2-5-flash-ocr",
@@ -125,6 +128,7 @@ export const OCR_MODELS: ModelOption[] = [
     provider: "gemini",
     model: "gemini-2.5-flash",
     vision: true,
+    note: "Gemini 的转写档，速度快；需要海外网络。",
   },
   {
     id: "gemini-2-5-pro-ocr",
@@ -132,6 +136,7 @@ export const OCR_MODELS: ModelOption[] = [
     provider: "gemini",
     model: "gemini-2.5-pro",
     vision: true,
+    note: "Gemini 旗舰转写，最稳但慢；适合特别难辨认的字迹。",
   },
 ];
 

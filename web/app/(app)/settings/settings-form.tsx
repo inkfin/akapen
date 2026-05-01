@@ -57,14 +57,14 @@ export function SettingsForm({ initial }: { initial: WebSettingsView }) {
     try {
       const r = await testAkapenConnectionAction();
       if (r.ok) {
-        toast.success("akapen 连通正常 + API key 鉴权通过");
+        toast.success("批改服务连接正常");
       } else {
         const parts: string[] = [];
-        if (r.livez !== "ok") parts.push("livez 失败");
-        if (r.auth === "bad_key") parts.push("API key 错");
+        if (r.livez !== "ok") parts.push("批改服务无响应");
+        if (r.auth === "bad_key") parts.push("服务密钥不匹配，请联系管理员");
         else if (r.auth !== "ok") parts.push("鉴权异常");
         if (r.detail) parts.push(r.detail);
-        toast.error(`连接异常：${parts.join("；") || "unknown"}`);
+        toast.error(`连接异常：${parts.join("；") || "未知错误"}`);
       }
     } finally {
       setTesting(false);
@@ -123,22 +123,22 @@ export function SettingsForm({ initial }: { initial: WebSettingsView }) {
       {/* ────── 主区：批改 prompt ────── */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">批改提示词模板（全局框架）</CardTitle>
+          <CardTitle className="text-base">批改提示词模板</CardTitle>
           <p className="text-xs text-muted-foreground">
-            这里写"输出 JSON 格式 / 评分流程"等通用框架；每道题的具体满分 / 给分点
-            在题目页填的「评分细则」（rubric）里写。Prompt 必须含{" "}
+            这里写**评分流程、输出格式、评语风格**等所有题共用的部分；每道题的具体满分 /
+            给分点请去题目页填「评分细则」。提示词中必须保留{" "}
             <code className="rounded bg-muted px-1 font-mono text-[11px]">
               {RUBRIC_PLACEHOLDER}
             </code>{" "}
-            占位符，批改时会自动替换成对应题目的 rubric。
+            占位符，批改时会自动把当前题的评分细则填进来。
           </p>
         </CardHeader>
         <CardContent>
           <PromptField
             label={
               gradingIsVision
-                ? "single-shot 提示词（看图同时转写 + 评分）"
-                : "批改提示词（看 OCR 转写打分）"
+                ? "看图直接评分（视觉模型一次过）"
+                : "看转写后的文字评分（文本模型两步批改）"
             }
             value={
               gradingIsVision ? s.singleShotPrompt : s.gradingPrompt
@@ -231,14 +231,13 @@ export function SettingsForm({ initial }: { initial: WebSettingsView }) {
             {gradingIsVision ? (
               <details className="rounded-md border p-3">
                 <summary className="cursor-pointer text-sm font-medium">
-                  两步模式批改提示词（少数老师才用）
+                  两步批改提示词（少数老师才用）
                 </summary>
                 <p className="mt-2 mb-3 text-xs text-muted-foreground">
-                  当前用的是 single-shot
-                  一次过，不会用到这条；保留是为了你切到两步模式时不丢配置。
+                  当前用的是视觉模型一次过的方式，不会用到这条；保留是为了切到文本模型两步批改时不丢配置。
                 </p>
                 <PromptField
-                  label="批改提示词（两步模式）"
+                  label="批改提示词（两步批改）"
                   value={s.gradingPrompt}
                   onChange={(v) => update("gradingPrompt", v)}
                   rows={6}
@@ -257,7 +256,7 @@ export function SettingsForm({ initial }: { initial: WebSettingsView }) {
       {/* ────── 操作栏 ────── */}
       <div className="sticky bottom-0 -mx-4 flex items-center justify-end gap-2 border-t bg-background px-4 py-3 md:mx-0 md:rounded-md md:border">
         <Button variant="outline" onClick={onTest} disabled={testing}>
-          {testing ? "测试中…" : "测试 akapen 连接"}
+          {testing ? "测试中…" : "测试服务连接"}
         </Button>
         <Button onClick={onSave} disabled={pending}>
           {pending ? "保存中…" : "保存"}
@@ -355,10 +354,8 @@ function ModelSelector({
             />
           </div>
           <p className="col-span-2 text-xs text-muted-foreground">
-            高级用法：粘贴模型快照或非默认 provider。backend 必须已注册该 provider
-            +
-            配好对应 API key（claude 需要 ANTHROPIC_API_KEY），否则跑批改会报
-            PROVIDER_ERROR。
+            粘贴自定义模型 ID（如 <code>qwen3-vl-plus-2025-09-23</code>）。
+            需要后台已经开通对应模型才能跑通；不确定可以先点上面「测试服务连接」。
           </p>
         </div>
       ) : null}
@@ -446,7 +443,7 @@ function PromptField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         rows={rows}
-        placeholder="留空 = 用 backend 默认"
+        placeholder="留空 = 用默认模板"
         className="font-mono text-xs"
         aria-invalid={missingRubric}
       />

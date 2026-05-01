@@ -151,7 +151,7 @@ export function CellDetailSheet({
               ) : (
                 <RefreshCw className="size-4" />
               )}
-              中台重试（不计费）
+              再试一次（不重新计费）
             </Button>
           ) : null}
         </div>

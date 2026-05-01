@@ -133,8 +133,7 @@ export function UpsertQuestionDialog({
               placeholder={RUBRIC_PLACEHOLDER_TEXT}
             />
             <p className="text-xs text-muted-foreground">
-              老师只需要写"本题满分多少分 + 给分点 / 扣分项"，输出 JSON 格式 /
-              评分流程等技术细节由「设置」里的全局 prompt 框架负责。
+              这里只写"本题满分多少分 + 给分点 / 扣分项"。整体评分流程、输出格式等通用部分会从「设置」里的全局批改提示词自动套用。
             </p>
           </div>
 
@@ -155,32 +154,33 @@ export function UpsertQuestionDialog({
             {advancedOpen ? (
               <div className="space-y-4 border-t p-3">
                 <p className="text-xs text-muted-foreground">
-                  填了下面任意一栏，会**整段替换**全局批改 prompt，不再走 {"{rubric}"}{" "}
-                  注入。仅当本题题型与全局模板差异巨大时使用（比如全局是中文作文，本题是数学应用题）。
+                  下面两栏留空就好，会自动用「设置」里的全局批改提示词 +
+                  本题评分细则组合。只有当**本题题型与其它题完全不同**（比如其它都是作文，本题是数学应用题），需要为这一道题写一份完全独立的提示词时，才往下面填东西 ——
+                  填了之后会**整段替换**全局提示词。
                 </p>
                 <div className="grid gap-2">
                   <Label htmlFor="customSingleShotPrompt" className="text-xs">
-                    自定义 single-shot prompt（视觉一次过模式）
+                    自定义提示词 · 视觉模型一次过
                   </Label>
                   <Textarea
                     id="customSingleShotPrompt"
                     name="customSingleShotPrompt"
                     rows={6}
                     defaultValue={existing?.customSingleShotPrompt ?? ""}
-                    placeholder="留空 = 用「设置」里的全局 single-shot prompt（推荐）"
+                    placeholder="留空（推荐）"
                     className="font-mono text-xs"
                   />
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="customGradingPrompt" className="text-xs">
-                    自定义批改 prompt（OCR + 批改两步模式）
+                    自定义提示词 · 文本模型两步批改
                   </Label>
                   <Textarea
                     id="customGradingPrompt"
                     name="customGradingPrompt"
                     rows={6}
                     defaultValue={existing?.customGradingPrompt ?? ""}
-                    placeholder="留空 = 用「设置」里的全局批改 prompt"
+                    placeholder="留空（推荐）"
                     className="font-mono text-xs"
                   />
                 </div>
