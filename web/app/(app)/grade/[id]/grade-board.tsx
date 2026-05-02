@@ -365,15 +365,16 @@ export function GradeBoard({
                               />
                               {/*
                                 "详情"按钮 —— 手机老师的主入口。
-                                shadcn size="sm" = h-8 (32px)，配合 cell 的 p-2
-                                总 tap 区域 ≈ 48px，安全过 44px 移动端阈值。
-                                px-2 比默认 px-3 收紧一点，单元格不至于撑太宽。
+                                iOS HIG / Material 建议最小约 44×44 pt 可点区域；
+                                `<td>` 的 padding 不会扩大 `<button>` 的可点区域，
+                                所以把按钮本体设为 h-11（2.75rem = 44px），不依赖外圈 cell padding。
+                                className 里的 h-11 覆盖 size="sm" 的 h-8（tailwind-merge）。
                               */}
                               <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={openDetail}
-                                className="gap-1 px-2"
+                                className="h-11 min-h-11 gap-1 px-2 text-xs"
                                 aria-label={`查看 ${s.name} 第 ${q.index} 题详情`}
                               >
                                 <Eye />
