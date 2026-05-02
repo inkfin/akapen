@@ -64,6 +64,10 @@ model HomeworkBatch {
   ownerId   String
   title     String     // "9月第一次作文"
   notes     String?    // 给批改者的整体说明
+  // 作业学科（语文 / 英语 / 数学 ...），用于拼作业级上下文。
+  subject   String?
+  // 作业目标（本次想考查什么能力），给 prompt 注入背景但不直接参与打分。
+  batchObjective String?
   dueDate   DateTime?
   class     Class      @relation(fields: [classId], references: [id], onDelete: Cascade)
   owner     User       @relation(fields: [ownerId], references: [id])
@@ -113,6 +117,16 @@ model Question {
 
   /// 高级：单题自定义 single-shot prompt（视觉一次过）。同上规则。
   customSingleShotPrompt String?
+
+  /// 单题覆盖思考开关（可空 = 继承 WebSettings.gradingThinking）。
+  /// 推荐字面值：force_on / force_off。
+  thinkingOverride String?
+
+  /// 是否要求模型在 feedback 外额外给一份"修改后的范文"。
+  provideModelAnswer Boolean @default(false)
+
+  /// 范文生成要求（可空）：如"给 2 版不同风格范文"、"保留原文核心意象"等。
+  modelAnswerGuide String?
 
   batch       HomeworkBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
   submissions Submission[]
@@ -175,6 +189,9 @@ model WebSettings {
   /// 留 NULL = 用硬编码默认（覆盖内容 / 结构 / 语言 / 语法的常规修改建议）。
   defaultFeedbackGuide String?
 
+  /// 老师级默认人设（只跟 user 走，不跟作业/题目走）。
+  defaultPersona String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -182,6 +199,10 @@ model WebSettings {
 model GradingTask {
   id             String     @id @default(cuid())
   submissionId   String
+  // 父任务（用于追问/重生范文形成 revision 时间线）。
+  parentId       String?
+  parent         GradingTask?  @relation("GradingTaskParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children       GradingTask[] @relation("GradingTaskParent")
   // akapen 那边的 task_id（POST /v1/grading-tasks 返回）；网络断开时可能为 null
   akapenTaskId   String?    @unique
   // 我们生成的幂等键：submissionId + ":r" + revision
@@ -195,6 +216,14 @@ model GradingTask {
   // succeeded -- 中台回调说成功，result 已落库
   // failed    -- 中台回调说失败，errorCode/Message 已落库
   status         String     @default("pending")
+  // 高层模式：grade（常规）/ revise（追问、范文重生都走 revise 管道）
+  mode           String     @default("grade")
+  // 动作语义：grade / followup / model_answer_regen（用于历史筛选）
+  actionType     String     @default("grade")
+  // 老师追问指令（可空）：仅 revise 场景会写。
+  teacherInstruction String?
+  // 追问返回的 prompt 优化建议（可空 JSON 文本），老师确认后才应用到 Question。
+  promptSuggestion String?
   result         String?    // 完整 GradingResult JSON 字符串
   finalScore     Float?     // 抽出来方便排序 / 筛选
   // LLM 实际用的满分（与 GradingResult.max_score 同源）。
@@ -210,6 +239,8 @@ model GradingTask {
   updatedAt      DateTime   @updatedAt
 
   @@index([submissionId])
+  @@index([parentId])
   @@index([status])
+  @@index([actionType])
   @@index([akapenTaskId])
 }
