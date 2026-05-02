@@ -12,6 +12,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# ---- 系统包 ---- #
+# libheif1 + libde265-0 是 HEIC 解码运行时；pillow-heif 走 manylinux wheel 但仍
+# 依赖系统级 libheif.so.1 / libde265.so.0 动态链接库。不装就导不出 HEIC 内容。
+# iPhone 老师从相册选已存图（AirDrop / 微信存的题目照片）大概率传 HEIC，所以这个
+# 必装。其他场景（直拍走 capture="environment" 时 Safari 会自动转 JPEG）能撑过去
+# 但不能保证；统一给 backend 解。约 +5 MB 镜像体积。
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libheif1 libde265-0 \
+ && rm -rf /var/lib/apt/lists/*
+
 # ---- 依赖层 ---- #
 # 先 COPY requirements.txt 再装包，业务代码改动不会让这层失效，构建快很多。
 COPY requirements.txt /app/requirements.txt
