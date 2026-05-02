@@ -10,6 +10,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StudentImageGrid } from "@/components/student-image-grid";
 import { auth } from "@/lib/auth";
 import {
   loadStudentReport,
@@ -355,19 +356,10 @@ function QuestionCard({ q }: { q: StudentReportQuestion }) {
         {q.imagePaths.length > 0 ? (
           <details className="rounded-md border p-2 print:hidden">
             <summary className="cursor-pointer text-xs text-muted-foreground">
-              学生原图（{q.imagePaths.length}）
+              学生原图（{q.imagePaths.length}） · 单击放大
             </summary>
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {q.imagePaths.map((p) => (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
-                  key={p}
-                  src={`/api/uploads-preview?p=${encodeURIComponent(p)}`}
-                  alt={p}
-                  className="rounded-md border object-cover"
-                  style={{ aspectRatio: "3/4" }}
-                />
-              ))}
+            <div className="mt-2">
+              <StudentImageGrid paths={q.imagePaths} />
             </div>
           </details>
         ) : null}

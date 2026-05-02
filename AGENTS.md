@@ -449,6 +449,7 @@ service `web` 与 `backend` 并列。
 | `web/app/api/grade/{status,submit,retry}/` | 大盘轮询 + 批改提交 + 重试 HTTP wrapper |
 | `web/app/u/[token]/` | 给 akapen 容器拉图的签名 URL（HMAC 鉴权） |
 | `web/app/logout/route.ts` | GET/POST 退出登录的稳定 URL（NextAuth v5 默认 `/api/auth/signout` 不响应 GET，老师地址栏访问 404） |
+| `web/components/student-image-grid.tsx` | 学生原图缩略图条 + 单击全屏 lightbox（Esc / ←→ / swipe）。`grade/[id]` 详情抽屉与 `results/[id]/students/[studentId]` 成绩单共用，避免两处分别再写一遍放大逻辑 |
 | `web/lib/auth.ts` / `auth.config.ts` | NextAuth v5（edge-safe config + 完整 config 分离）。`lib/auth.ts:jwt` 每 5 分钟核对 `token.userId` 仍在 DB 里，stale 则返 null 清 session（防御 web.db 备份恢复 / 重建后老师 cookie 里 userId 不存在导致 P2003 FK 暴雷） |
 | `web/lib/db.ts` | Prisma client singleton（dev 防 hot reload 多实例） |
 | `web/lib/akapen.ts` | akapen HTTP 客户端（创建任务 / 查状态 / 重试 + 退避） |
