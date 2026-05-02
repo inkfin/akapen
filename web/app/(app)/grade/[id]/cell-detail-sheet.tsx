@@ -137,11 +137,13 @@ export function CellDetailSheet({
       }}
     >
       {/*
-        宽度策略：
-        - 手机（默认）：占满（继承 ui/sheet.tsx 的 w-full max-w-md）
-        - 平板 sm/md：~640~768px，让维度表 + feedback 不挤
-        - 桌面 lg/xl：~960~1120px，老师能边看大盘边看详情，不浪费宽屏
-        cn() 用 tailwind-merge，下面这串 max-w-* 会覆盖基础组件的 sm:max-w-lg。
+        宽度策略（Tailwind 默认 rem→px 按 16px root；与下面 class 一一对应）：
+        - 手机（默认）：w-full max-w-md → 约 448px 封顶，再窄则全宽
+        - sm: max-w-xl → 36rem ≈ 576px
+        - md: max-w-2xl → 42rem ≈ 672px
+        - lg: max-w-3xl → 48rem ≈ 768px
+        - xl: max-w-4xl → 56rem ≈ 896px
+        cn() + tailwind-merge 会覆盖 ui/sheet.tsx 自带的 sm:max-w-lg。
       */}
       <SheetContent className="overflow-y-auto sm:max-w-xl md:max-w-2xl lg:max-w-3xl xl:max-w-4xl">
         <SheetHeader>
