@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Play, RefreshCw, Sparkles } from "lucide-react";
+import { Eye, Loader2, Play, RefreshCw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -324,22 +324,28 @@ export function GradeBoard({
                     const label = describeCell(c, q.requireGrading);
                     const isSelected =
                       c.submissionId && selected.has(c.submissionId);
+                    const openDetail = () =>
+                      setDetailFor({
+                        studentId: s.id,
+                        questionId: q.id,
+                      });
                     return (
                       <td
                         key={q.id}
                         className="border-l p-2 text-center align-middle"
                       >
-                        <div className="flex flex-col items-center gap-1">
+                        <div className="flex flex-col items-center gap-1.5">
+                          {/*
+                            Badge 仍可点 —— 桌面老师习惯了"点分数看详情"。
+                            mobile 上手指点小 badge 容易点偏，但下面有显式
+                            "详情"按钮兜底，所以这里保留即可。
+                          */}
                           <button
                             type="button"
-                            onClick={() =>
-                              setDetailFor({
-                                studentId: s.id,
-                                questionId: q.id,
-                              })
-                            }
-                            className="flex w-full justify-center"
+                            onClick={openDetail}
+                            className="flex w-full justify-center rounded transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:hover:bg-transparent"
                             disabled={!c.submissionId}
+                            aria-label={`${s.name} 第 ${q.index} 题：${label.text}`}
                           >
                             <Badge variant={label.variant}>
                               {label.pending ? (
@@ -349,13 +355,31 @@ export function GradeBoard({
                             </Badge>
                           </button>
                           {c.submissionId ? (
-                            <Checkbox
-                              checked={!!isSelected}
-                              onCheckedChange={() =>
-                                c.submissionId && toggle(c.submissionId)
-                              }
-                              aria-label={`选中 ${s.name} 第 ${q.index} 题`}
-                            />
+                            <div className="flex items-center gap-1.5">
+                              <Checkbox
+                                checked={!!isSelected}
+                                onCheckedChange={() =>
+                                  c.submissionId && toggle(c.submissionId)
+                                }
+                                aria-label={`选中 ${s.name} 第 ${q.index} 题`}
+                              />
+                              {/*
+                                "详情"按钮 —— 手机老师的主入口。
+                                shadcn size="sm" = h-8 (32px)，配合 cell 的 p-2
+                                总 tap 区域 ≈ 48px，安全过 44px 移动端阈值。
+                                px-2 比默认 px-3 收紧一点，单元格不至于撑太宽。
+                              */}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={openDetail}
+                                className="gap-1 px-2"
+                                aria-label={`查看 ${s.name} 第 ${q.index} 题详情`}
+                              >
+                                <Eye />
+                                详情
+                              </Button>
+                            </div>
                           ) : null}
                         </div>
                       </td>
