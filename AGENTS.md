@@ -504,6 +504,25 @@ service `web` 与 `backend` 并列。
 - ❌ **不要用 `group-hover:` 显隐操作按钮**：触屏设备根本没有 hover 状态，
   老师在手机上**永远点不到**。删除 / 编辑这类操作图标必须始终可见
   （半透明背景 + 主图标即可保持视觉清爽）。
+- ❌ **新增可拖拽列表（重排序 / 排序）必须用 `@dnd-kit`**，不要用
+  HTML5 native drag-and-drop（触屏不工作）也不要用 `react-beautiful-dnd`
+  （已 deprecated）。`question-uploader.tsx` 是参考实现，关键约束：
+  - **桌面 + 移动两套 sensor**：`MouseSensor` 配 `activationConstraint:
+    { distance: 8 }`（移动 8px 才触发拖动，避免吞掉单击）；`TouchSensor`
+    配 `{ delay: 200, tolerance: 5 }`（长按 200ms 才触发，避免跟"上下
+    滑动滚页面"冲突）；外加 `KeyboardSensor` + `sortableKeyboardCoordinates`
+    给 a11y 兜底。
+  - **拖动元素必须 `touch-action: none` + `<img draggable={false}>`**：
+    iOS Safari 不加 touch-action 会让原生惯性滚动跟拖动手势打架；img 不
+    设 draggable=false 浏览器会画一个"幽灵图"盖在 dnd-kit overlay 上，
+    看起来两层东西在动。
+  - **删除/操作按钮必须 `onPointerDown={(e) => e.stopPropagation()}`**：
+    否则按下按钮也会触发外层 sensor activation，老师"想点删除"变成"开始
+    拖动"。
+  - **服务端只允许"重排序"，不允许通过 reorder 接口增删**：参考
+    `web/app/api/upload/route.ts:PATCH` —— 校验新数组是旧数组的
+    permutation（multiset 严格匹配），不一致返 409 让 client 刷新。
+    避免 race / bug 同时丢图 + 改序。
 
 ### 11.5 `web/` 烟测
 
