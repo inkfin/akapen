@@ -15,15 +15,41 @@ import { signOut } from "@/lib/auth";
  * readonly 的，调 signOut 会抛错；route handler 的 GET / POST 上下文
  * 是 fully writable 的。
  *
- * GET 退出的安全考量：第三方站点 `<img src="//akapen/logout">` 能静默
- * 把老师退出。退出操作风险有限（最坏重登），先接受这个 trade-off；将来
- * 想加 CSRF token 再改 POST + form submit。
- *
- * `redirect: false` + 手动 NextResponse.redirect：让我们能控制 redirect URL
- * 带上 `?from=logout` 提示登录页 "刚刚退出过"（虽然现在登录页还没用这个
- * 参数显示什么，预留 hook）。
+ * 同源校验：
+ * - 拒绝跨站请求（Sec-Fetch-Site === "cross-site" / "same-site" 之外的
+ *   Origin host）—— 防止恶意第三方站点 `<img src="//akapen/logout">` 静默
+ *   把老师退出。
+ * - 允许 `Sec-Fetch-Site: none`（地址栏直接输入 / 书签）和 `same-origin`
+ *   （站内点击 / form submit）。
+ * - 老浏览器没 Sec-Fetch-Site：fallback 到 Origin / Referer host 比对，
+ *   两者都没有则按"地址栏输入"放行（与 fetch-site=none 同语义）。
  */
+function isSameSiteRequest(req: Request): boolean {
+  const fetchSite = req.headers.get("sec-fetch-site");
+  if (fetchSite) {
+    // "none" = 地址栏 / 书签；"same-origin" = 同源 fetch；"same-site" = 同
+    // eTLD+1（罕见，比如 a.example.com → b.example.com）。其他值（"cross-site"
+    // / 未知）一律拒。
+    return (
+      fetchSite === "none" ||
+      fetchSite === "same-origin" ||
+      fetchSite === "same-site"
+    );
+  }
+  // 老浏览器 fallback
+  const origin = req.headers.get("origin") ?? req.headers.get("referer");
+  if (!origin) return true; // 视同地址栏直接输入
+  try {
+    return new URL(origin).host === new URL(req.url).host;
+  } catch {
+    return false;
+  }
+}
+
 export async function GET(req: Request) {
+  if (!isSameSiteRequest(req)) {
+    return new NextResponse("forbidden", { status: 403 });
+  }
   await signOut({ redirect: false });
   return NextResponse.redirect(new URL("/login?from=logout", req.url));
 }
