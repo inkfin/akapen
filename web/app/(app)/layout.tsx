@@ -67,12 +67,32 @@ export default async function AppLayout({
       <div className="flex flex-1 flex-col">
         <header className="flex h-14 items-center justify-between border-b bg-card px-4 md:hidden">
           <span className="font-semibold">akapen</span>
-          <nav className="flex gap-3 text-sm">
+          <nav className="flex items-center gap-3 text-sm">
             {NAV.map((item) => (
-              <Link key={item.href} href={item.href}>
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-label={item.label}
+                className="flex size-9 items-center justify-center rounded-md text-foreground hover:bg-accent"
+              >
                 <item.icon className="size-5" />
               </Link>
             ))}
+            {/*
+              退出按钮 —— 用 form + server action 而不是 Link 到 /logout，因为
+              POST 风格 signOut 不会被浏览器预取（GET /logout 老师误中预取就被
+              清了 session）。Link 到 /logout 仍然保留作为 fallback URL（地址
+              栏直接敲），但这个按钮走 server action 更安全。
+            */}
+            <form action={signOutAction}>
+              <button
+                type="submit"
+                aria-label="退出登录"
+                className="flex size-9 items-center justify-center rounded-md text-foreground hover:bg-accent"
+              >
+                <LogOut className="size-5" />
+              </button>
+            </form>
           </nav>
         </header>
         <main className="flex-1 overflow-x-auto p-4 md:p-6">{children}</main>
