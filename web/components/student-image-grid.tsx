@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, RotateCcw, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -35,6 +36,9 @@ type Props = {
  *   误判（参考 `question-uploader.tsx` 那里是因为 dnd-kit 才禁用拖动）
  * - 不要替换 `/api/uploads-preview` 为 `/u/[token]`——后者只给 akapen 容器拉图，
  *   暴露给老师浏览器会让签名 secret 路径泄漏
+ * - 不要把 lightbox 渲染回组件树本地：grade detail Sheet 的 SheetContent
+ *   带 `slide-in-from-right` transform 类，会让 fixed 后代相对它定位
+ *   （CSS 规范），lightbox 就被困在 480px 抽屉里。永远 portal 到 body。
  */
 export function StudentImageGrid({ paths, className }: Props) {
   const [openAt, setOpenAt] = useState<number | null>(null);
@@ -50,8 +54,10 @@ export function StudentImageGrid({ paths, className }: Props) {
         )}
       >
         {paths.map((p, i) => (
+          // key 带 index：实际 paths 来自 sha-命名的 imagePaths，重复概率极低；
+          // 但客户端拖拽 / 服务端写入未完全收敛时短暂重复也能稳。
           <button
-            key={p}
+            key={`${i}_${p}`}
             type="button"
             onClick={() => setOpenAt(i)}
             aria-label={`查看第 ${i + 1} 张原图`}
@@ -167,6 +173,9 @@ function Lightbox({
 }) {
   const total = paths.length;
   const [t, setT] = useState<Transform>(IDENTITY);
+  // SSR-safe portal target：mount 后才生效（document 不在 server 端可用）
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const reset = useCallback(() => setT(IDENTITY), []);
 
@@ -184,8 +193,11 @@ function Lightbox({
     }
   }, [index, total, onIndex, reset]);
 
-  // 键盘 + 锁 body scroll
+  // 键盘 + 锁 body scroll + 关闭时还原触发元素的焦点
   useEffect(() => {
+    // 保存 lightbox 打开前最后聚焦的元素（一般是触发缩略图按钮）
+    const prevFocused = (document.activeElement as HTMLElement | null) ?? null;
+
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
       else if (e.key === "ArrowLeft") goPrev();
@@ -200,14 +212,49 @@ function Lightbox({
     return () => {
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
+      // 关闭后把焦点还给原触发缩略图按钮（screen reader / 键盘用户体验）
+      if (prevFocused && typeof prevFocused.focus === "function") {
+        try {
+          prevFocused.focus();
+        } catch {
+          // 元素已卸载或被禁用，安静吃掉
+        }
+      }
     };
   }, [goPrev, goNext, onClose, reset]);
+
+  // 进入 lightbox 后把焦点放到关闭按钮，方便键盘用户立即 Esc / Tab。
+  // 用 `inert` 隔离 lightbox 之外的 body 子树，配合 portal 一起做出和 Radix
+  // Dialog 等价的 focus trap：键盘 / 鼠标 / 屏幕阅读器都进不去 lightbox 之外。
+  // 依赖 `mounted`：portal 第一次 render 时 ref 还没挂上，要等到 mounted=true。
+  const closeBtnRef = useRef<HTMLButtonElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!mounted) return;
+    closeBtnRef.current?.focus();
+
+    // 把 body 里所有非 lightbox 兄弟节点设 inert，记录原状态以便还原。
+    const root = rootRef.current;
+    const siblings = Array.from(document.body.children).filter(
+      (el) => el !== root,
+    );
+    const wasInert = siblings.map((el) => el.hasAttribute("inert"));
+    siblings.forEach((el) => el.setAttribute("inert", ""));
+    return () => {
+      siblings.forEach((el, i) => {
+        if (!wasInert[i]) el.removeAttribute("inert");
+      });
+    };
+  }, [mounted]);
 
   /* ---------- wheel 缩放（桌面） ---------- */
   // 用 ref + 非被动监听器，为了 preventDefault（react onWheel 默认是 passive，
   // preventDefault 会被忽略，导致页面跟着滚 / lightbox 内 scale 跳动）。
+  // deps 含 `mounted`：portal 在 mounted=false 第一次 render 不挂 DOM，
+  // ref 还没指到节点；mounted 翻 true 后 effect 重跑才能拿到 stage 元素。
   const stageRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
+    if (!mounted) return;
     const el = stageRef.current;
     if (!el) return;
     function onWheel(e: WheelEvent) {
@@ -220,7 +267,7 @@ function Lightbox({
     }
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [mounted]);
 
   /* ---------- 触摸：单指拖动（缩放后） / 双指 pinch / 单指 swipe（未缩放） ---------- */
   type TouchSession =
@@ -379,8 +426,15 @@ function Lightbox({
 
   const isZoomed = t.scale > 1;
 
-  return (
+  // lightbox 圆形按钮统一样式：白色环作 focus-visible 指示，跟黑底反差好。
+  const btnClass =
+    "flex size-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-black";
+
+  if (!mounted) return null;
+
+  const ui = (
     <div
+      ref={rootRef}
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/95"
       role="dialog"
       aria-modal="true"
@@ -401,20 +455,21 @@ function Lightbox({
                 reset();
               }}
               aria-label="复位 (键盘 0)"
-              className="flex size-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
+              className={btnClass}
             >
               <RotateCcw className="size-5" />
             </button>
           </>
         ) : null}
         <button
+          ref={closeBtnRef}
           type="button"
           onClick={(e) => {
             e.stopPropagation();
             onClose();
           }}
-          aria-label="关闭"
-          className="flex size-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
+          aria-label="关闭 (Esc)"
+          className={btnClass}
         >
           <X className="size-5" />
         </button>
@@ -427,8 +482,8 @@ function Lightbox({
             e.stopPropagation();
             goPrev();
           }}
-          aria-label="上一张"
-          className="absolute left-3 z-[2] hidden size-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 sm:flex"
+          aria-label="上一张 (←)"
+          className={cn("absolute left-3 z-[2] hidden sm:flex", btnClass)}
         >
           <ChevronLeft className="size-6" />
         </button>
@@ -441,8 +496,8 @@ function Lightbox({
             e.stopPropagation();
             goNext();
           }}
-          aria-label="下一张"
-          className="absolute right-3 z-[2] hidden size-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 sm:flex"
+          aria-label="下一张 (→)"
+          className={cn("absolute right-3 z-[2] hidden sm:flex", btnClass)}
         >
           <ChevronRight className="size-6" />
         </button>
@@ -491,4 +546,9 @@ function Lightbox({
       ) : null}
     </div>
   );
+
+  // CSS 规范：transform 不为 none 的祖先会成为 fixed 后代的 containing block。
+  // grade detail 抽屉的 SheetContent 带 `slide-in-from-right` transform 类，
+  // 不 portal 的话 lightbox 的 fixed inset-0 会被困在 480px 抽屉里。
+  return createPortal(ui, document.body);
 }
