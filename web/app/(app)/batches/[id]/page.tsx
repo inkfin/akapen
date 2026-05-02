@@ -24,6 +24,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { deleteQuestionAction } from "@/lib/actions/batches";
 
+import { BatchSettingsForm } from "./batch-settings-form";
 import { UpsertQuestionDialog } from "./upsert-question-dialog";
 
 export const dynamic = "force-dynamic";
@@ -63,6 +64,13 @@ export default async function BatchDetailPage({
             <p className="text-sm text-muted-foreground">
               {batch.class.name} · {batch.class._count.students} 名学生 · {batch.questions.length} 题
             </p>
+            {batch.subject || batch.batchObjective ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {batch.subject ? `学科：${batch.subject}` : ""}
+                {batch.subject && batch.batchObjective ? " · " : ""}
+                {batch.batchObjective ? `目标：${batch.batchObjective}` : ""}
+              </p>
+            ) : null}
           </div>
         </div>
         <div className="flex gap-2">
@@ -83,6 +91,24 @@ export default async function BatchDetailPage({
           </Button>
         </div>
       </div>
+
+      <details className="rounded-md border p-3">
+        <summary className="cursor-pointer text-sm font-medium">
+          作业设置（页内编辑）
+        </summary>
+        <p className="mt-1 mb-3 text-xs text-muted-foreground">
+          这里配置作业级上下文（学科/目标/备注），不用额外弹窗或抽屉。
+        </p>
+        <BatchSettingsForm
+          batch={{
+            id: batch.id,
+            title: batch.title,
+            notes: batch.notes,
+            subject: batch.subject,
+            batchObjective: batch.batchObjective,
+          }}
+        />
+      </details>
 
       <Card>
         <CardHeader className="flex-row items-center justify-between">
@@ -153,6 +179,11 @@ export default async function BatchDetailPage({
                             （默认指南）
                           </p>
                         )}
+                        {q.provideModelAnswer ? (
+                          <p className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400">
+                            ✨ 输出范文
+                          </p>
+                        ) : null}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
@@ -166,6 +197,9 @@ export default async function BatchDetailPage({
                               requireGrading: q.requireGrading,
                               rubric: q.rubric,
                               feedbackGuide: q.feedbackGuide,
+                              thinkingOverride: q.thinkingOverride,
+                              provideModelAnswer: q.provideModelAnswer,
+                              modelAnswerGuide: q.modelAnswerGuide,
                               customGradingPrompt: q.customGradingPrompt,
                               customSingleShotPrompt: q.customSingleShotPrompt,
                             }}

@@ -37,6 +37,9 @@ type Existing = {
   requireGrading: boolean;
   rubric: string | null;
   feedbackGuide: string | null;
+  thinkingOverride: string | null;
+  provideModelAnswer: boolean;
+  modelAnswerGuide: string | null;
   customGradingPrompt: string | null;
   customSingleShotPrompt: string | null;
 };
@@ -129,7 +132,12 @@ export function UpsertQuestionDialog({
   const [open, setOpen] = useState(false);
   const [state, formAction] = useActionState(upsertQuestionAction, undefined);
   const [advancedOpen, setAdvancedOpen] = useState(
-    !!(existing?.customGradingPrompt || existing?.customSingleShotPrompt),
+    !!(
+      existing?.customGradingPrompt ||
+      existing?.customSingleShotPrompt ||
+      existing?.thinkingOverride ||
+      existing?.provideModelAnswer
+    ),
   );
   // requireGrading 是显式 boolean 列；新建题默认 true（按打分走）。
   // 受控 + 隐藏 input：避免依赖 checkbox 的 native FormData 行为（unchecked 不发字段），
@@ -141,6 +149,9 @@ export function UpsertQuestionDialog({
   // 在 DOM 树位置变了（外层 vs 嵌进 details），React 会卸载重挂，**用户没保存的草稿
   // 会被 defaultValue 覆盖**。受控 state 在两种渲染分支间共享，切了再切回来还在。
   const [rubric, setRubric] = useState<string>(existing?.rubric ?? "");
+  const [provideModelAnswer, setProvideModelAnswer] = useState<boolean>(
+    existing?.provideModelAnswer ?? false,
+  );
 
   useEffect(() => {
     if (state?.ok) {
@@ -331,6 +342,55 @@ export function UpsertQuestionDialog({
                   只有当本题需要**完全独立**的提示词（比如全局模板根本不适用）时，才往下面填东西 ——
                   填了之后会**整段替换**全局提示词。
                 </p>
+                <div className="grid gap-2 rounded-md border p-3">
+                  <Label className="text-xs">思考模式覆盖（可选）</Label>
+                  <select
+                    name="thinkingOverride"
+                    defaultValue={existing?.thinkingOverride ?? ""}
+                    className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+                  >
+                    <option value="">继承全局设置</option>
+                    <option value="force_on">强制开启（本题更慢更细）</option>
+                    <option value="force_off">强制关闭（本题更快）</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    只影响这道题；留空表示跟随「设置」页的全局思考开关。
+                  </p>
+                </div>
+                <div className="grid gap-2 rounded-md border p-3">
+                  <div className="flex items-start gap-3">
+                    <Checkbox
+                      id="provideModelAnswer"
+                      name="provideModelAnswer"
+                      checked={provideModelAnswer}
+                      onCheckedChange={(v) => setProvideModelAnswer(v === true)}
+                    />
+                    <div className="space-y-0.5">
+                      <Label htmlFor="provideModelAnswer" className="cursor-pointer text-sm">
+                        要求输出修改后范文
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        打开后模型会额外给出 <code>model_answer</code>，适合课堂讲评时展示参考写法。
+                      </p>
+                    </div>
+                  </div>
+                  {provideModelAnswer ? (
+                    <div className="grid gap-2">
+                      <Label htmlFor="modelAnswerGuide" className="text-xs">
+                        范文要求（可选）
+                      </Label>
+                      <Textarea
+                        id="modelAnswerGuide"
+                        name="modelAnswerGuide"
+                        rows={4}
+                        defaultValue={existing?.modelAnswerGuide ?? ""}
+                        placeholder="例如：给 2 版不同风格范文；尽量保留学生原文意象；每版控制在 250 字内。"
+                      />
+                    </div>
+                  ) : (
+                    <input type="hidden" name="modelAnswerGuide" value="" />
+                  )}
+                </div>
                 <div className="grid gap-2">
                   <Label htmlFor="customSingleShotPrompt" className="text-xs">
                     自定义提示词 · 视觉模型一次过
