@@ -20,6 +20,7 @@ type ResultPayload = ParsedGradingResult & {
   gradingTaskId: string;
   status: string;
   reviewFlag: boolean;
+  promptSuggestion: string | null;
   errorCode: string | null;
   errorMessage: string | null;
 };
@@ -58,6 +59,7 @@ export async function GET(req: Request) {
     gradingTaskId: t.id,
     status: t.status,
     reviewFlag: t.reviewFlag,
+    promptSuggestion: t.promptSuggestion,
     errorCode: t.errorCode,
     errorMessage: t.errorMessage,
   };

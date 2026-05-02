@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Sheet,
@@ -53,6 +54,7 @@ type ResultPayload = {
   }>;
   transcription: string;
   modelAnswer: string | null;
+  promptSuggestion: string | null;
   errorCode: string | null;
   errorMessage: string | null;
 };
@@ -67,6 +69,13 @@ export function CellDetailSheet({
   const qc = useQueryClient();
   const [followupText, setFollowupText] = useState("");
   const [historyFilter, setHistoryFilter] = useState<"all" | "model_answer">("all");
+  const [optimizePrompt, setOptimizePrompt] = useState(false);
+
+  type ParsedSuggestion = {
+    reason: string | null;
+    suggestedRubric: string | null;
+    suggestedFeedbackGuide: string | null;
+  };
 
   type HistoryItem = {
     gradingTaskId: string;
@@ -80,6 +89,35 @@ export function CellDetailSheet({
     updatedAt: string;
     hasModelAnswer: boolean;
   };
+
+  function parseSuggestion(raw: string | null): ParsedSuggestion | null {
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const reason =
+        typeof parsed.reason === "string" && parsed.reason.trim()
+          ? parsed.reason.trim()
+          : null;
+      const suggestedRubric =
+        typeof parsed.suggested_rubric === "string"
+          ? parsed.suggested_rubric.trim() || null
+          : typeof parsed.suggestedRubric === "string"
+            ? parsed.suggestedRubric.trim() || null
+            : null;
+      const suggestedFeedbackGuide =
+        typeof parsed.suggested_feedback_guide === "string"
+          ? parsed.suggested_feedback_guide.trim() || null
+          : typeof parsed.suggestedFeedbackGuide === "string"
+            ? parsed.suggestedFeedbackGuide.trim() || null
+            : null;
+      if (!reason && !suggestedRubric && !suggestedFeedbackGuide) return null;
+      return { reason, suggestedRubric, suggestedFeedbackGuide };
+    } catch {
+      const text = raw.trim();
+      if (!text) return null;
+      return { reason: text, suggestedRubric: null, suggestedFeedbackGuide: null };
+    }
+  }
 
   // 详情抽屉打开 + 已 succeeded 时按需拉一次完整 result。
   // 没用 refetchInterval：result 拿到就不会变（重批走新 GradingTask），
@@ -124,6 +162,7 @@ export function CellDetailSheet({
     mutationFn: async (payload?: {
       actionType?: "grade" | "followup" | "model_answer_regen";
       teacherInstruction?: string;
+      optimizePrompt?: boolean;
     }) => {
       if (!cell.submissionId) throw new Error("没有上传图片");
       const r = await fetch("/api/grade/submit", {
@@ -133,6 +172,7 @@ export function CellDetailSheet({
           submissionIds: [cell.submissionId],
           actionType: payload?.actionType ?? "grade",
           teacherInstruction: payload?.teacherInstruction ?? undefined,
+          optimizePrompt: payload?.optimizePrompt ?? false,
         }),
       });
       if (!r.ok) {
@@ -152,6 +192,37 @@ export function CellDetailSheet({
       qc.invalidateQueries({ queryKey: ["grade-board", batchId] });
       qc.invalidateQueries({ queryKey: ["grade-history", cell.submissionId] });
       setFollowupText("");
+      if (vars?.actionType === "followup") setOptimizePrompt(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const applySuggestionMut = useMutation({
+    mutationFn: async () => {
+      if (!result?.gradingTaskId) throw new Error("没有可应用的建议");
+      const r = await fetch("/api/grade/apply-suggestion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gradingTaskId: result.gradingTaskId }),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error(e.error ?? `HTTP ${r.status}`);
+      }
+      return (await r.json()) as {
+        ok: boolean;
+        applied: { rubric: boolean; feedbackGuide: boolean };
+      };
+    },
+    onSuccess: (res) => {
+      toast.success(
+        `已应用建议（${[
+          res.applied.rubric ? "给分细则" : "",
+          res.applied.feedbackGuide ? "修改意见方向" : "",
+        ]
+          .filter(Boolean)
+          .join(" + ")}）`,
+      );
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -186,6 +257,7 @@ export function CellDetailSheet({
     if (historyFilter === "all") return true;
     return item.actionType === "model_answer_regen" || item.hasModelAnswer;
   });
+  const suggestion = parseSuggestion(result?.promptSuggestion ?? null);
 
   return (
     <Sheet
@@ -397,6 +469,7 @@ export function CellDetailSheet({
                     submitMut.mutate({
                       actionType: "followup",
                       teacherInstruction: followupText.trim(),
+                      optimizePrompt,
                     })
                   }
                   disabled={
@@ -406,6 +479,13 @@ export function CellDetailSheet({
                   {submitMut.isPending ? "提交中…" : "提交追问"}
                 </Button>
               </div>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Checkbox
+                  checked={optimizePrompt}
+                  onCheckedChange={(v) => setOptimizePrompt(v === true)}
+                />
+                本次追问同时生成 prompt 优化建议（仅题目级，不改全局模板）
+              </label>
             </div>
           </section>
         ) : null}
@@ -497,6 +577,44 @@ export function CellDetailSheet({
                 <span className="font-medium">备注：</span>
                 {result.notes}
               </p>
+            ) : null}
+            {suggestion ? (
+              <section className="space-y-2 rounded-md border p-3">
+                <div className="text-sm font-medium">Prompt 优化建议（AI）</div>
+                {suggestion.reason ? (
+                  <p className="text-xs text-muted-foreground">
+                    原因：{suggestion.reason}
+                  </p>
+                ) : null}
+                {suggestion.suggestedRubric ? (
+                  <div className="space-y-1">
+                    <div className="text-xs font-medium">建议给分细则</div>
+                    <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border bg-muted/20 p-2 text-xs">
+                      {suggestion.suggestedRubric}
+                    </pre>
+                  </div>
+                ) : null}
+                {suggestion.suggestedFeedbackGuide ? (
+                  <div className="space-y-1">
+                    <div className="text-xs font-medium">建议修改意见方向</div>
+                    <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border bg-muted/20 p-2 text-xs">
+                      {suggestion.suggestedFeedbackGuide}
+                    </pre>
+                  </div>
+                ) : null}
+                {(suggestion.suggestedRubric || suggestion.suggestedFeedbackGuide) ? (
+                  <div className="flex justify-end">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => applySuggestionMut.mutate()}
+                      disabled={applySuggestionMut.isPending}
+                    >
+                      {applySuggestionMut.isPending ? "应用中…" : "应用到本题"}
+                    </Button>
+                  </div>
+                ) : null}
+              </section>
             ) : null}
           </div>
         ) : null}

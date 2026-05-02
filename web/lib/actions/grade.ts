@@ -225,6 +225,7 @@ export async function gradeSubmissionsAction(
     mode?: "grade" | "revise";
     actionType?: "grade" | "followup" | "model_answer_regen";
     teacherInstruction?: string;
+    optimizePrompt?: boolean;
   },
 ): Promise<{ ok: number; failed: number; errors: string[] }> {
   const userId = await requireUserId();
@@ -236,6 +237,7 @@ export async function gradeSubmissionsAction(
   const mode = options?.mode ?? "grade";
   const actionType = options?.actionType ?? "grade";
   const teacherInstruction = (options?.teacherInstruction ?? "").trim();
+  const optimizePrompt = options?.optimizePrompt === true;
 
   // 一次性把 submission + 关联实体取出来，避免 N+1
   const submissions = await prisma.submission.findMany({
@@ -333,6 +335,17 @@ export async function gradeSubmissionsAction(
       }
       if (teacherInstruction) {
         ctxParts.push(`老师追问/补充要求：\n${teacherInstruction}`);
+      }
+      if (actionType === "followup" && optimizePrompt) {
+        ctxParts.push(
+          [
+            "额外任务（仅本次生效）：请在输出里补充 prompt_suggestion 字段，帮助老师优化题目级提示词。",
+            "要求：",
+            "- 只建议题目级字段，不要改系统全局模板",
+            "- 用结构化对象：{reason, suggested_rubric, suggested_feedback_guide}",
+            "- 如果你判断现有 prompt 已足够清晰，也可省略该字段",
+          ].join("\n"),
+        );
       }
       if (actionType === "model_answer_regen") {
         ctxParts.push(
