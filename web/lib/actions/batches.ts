@@ -117,6 +117,11 @@ const requireGradingSchema = z.preprocess((v) => {
   return s === "on" || s === "true" || s === "1" || s === "yes";
 }, z.boolean());
 
+const thinkingOverrideSchema = z.preprocess((v) => {
+  if (v === undefined || v === null) return "";
+  return String(v).trim().toLowerCase();
+}, z.enum(["", "force_on", "force_off"]));
+
 const questionCreate = z
   .object({
     batchId: z.string().min(1),
@@ -125,7 +130,7 @@ const questionCreate = z
     requireGrading: requireGradingSchema,
     rubric: optionalText(4000),
     feedbackGuide: optionalText(4000),
-    thinkingOverride: optionalText(32),
+    thinkingOverride: thinkingOverrideSchema,
     provideModelAnswer: z.preprocess((v) => {
       if (typeof v === "boolean") return v;
       if (v === undefined || v === null) return false;
@@ -142,18 +147,6 @@ const questionCreate = z
         code: z.ZodIssueCode.custom,
         path: ["rubric"],
         message: "需要打分时，给分细则不能为空",
-      });
-    }
-    const normalizedThinking = val.thinkingOverride.trim().toLowerCase();
-    if (
-      normalizedThinking !== "" &&
-      normalizedThinking !== "force_on" &&
-      normalizedThinking !== "force_off"
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["thinkingOverride"],
-        message: "思考模式覆盖只能是 force_on / force_off 或留空",
       });
     }
   });

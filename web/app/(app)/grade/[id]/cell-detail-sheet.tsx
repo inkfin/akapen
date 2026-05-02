@@ -66,6 +66,20 @@ export function CellDetailSheet({
 }: Props) {
   const qc = useQueryClient();
   const [followupText, setFollowupText] = useState("");
+  const [historyFilter, setHistoryFilter] = useState<"all" | "model_answer">("all");
+
+  type HistoryItem = {
+    gradingTaskId: string;
+    revision: number;
+    status: string;
+    mode: string;
+    actionType: string;
+    finalScore: number | null;
+    maxScore: number | null;
+    teacherInstruction: string | null;
+    updatedAt: string;
+    hasModelAnswer: boolean;
+  };
 
   // 详情抽屉打开 + 已 succeeded 时按需拉一次完整 result。
   // 没用 refetchInterval：result 拿到就不会变（重批走新 GradingTask），
@@ -86,6 +100,24 @@ export function CellDetailSheet({
     },
     enabled: !!cell.latest && cell.latest.status === "succeeded",
     staleTime: 60_000,
+  });
+
+  const { data: historyData, isFetching: historyFetching } = useQuery({
+    queryKey: ["grade-history", cell.submissionId],
+    queryFn: async (): Promise<{ items: HistoryItem[] }> => {
+      if (!cell.submissionId) return { items: [] };
+      const r = await fetch(
+        `/api/grade/history?submissionId=${encodeURIComponent(cell.submissionId)}`,
+        { cache: "no-store" },
+      );
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error(e.error ?? `HTTP ${r.status}`);
+      }
+      return (await r.json()) as { items: HistoryItem[] };
+    },
+    enabled: !!cell.submissionId,
+    staleTime: 20_000,
   });
 
   const submitMut = useMutation({
@@ -118,6 +150,7 @@ export function CellDetailSheet({
         toast.success("已提交批改");
       }
       qc.invalidateQueries({ queryKey: ["grade-board", batchId] });
+      qc.invalidateQueries({ queryKey: ["grade-history", cell.submissionId] });
       setFollowupText("");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -140,6 +173,7 @@ export function CellDetailSheet({
     onSuccess: () => {
       toast.success("已发起重试");
       qc.invalidateQueries({ queryKey: ["grade-board", batchId] });
+      qc.invalidateQueries({ queryKey: ["grade-history", cell.submissionId] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -147,6 +181,11 @@ export function CellDetailSheet({
   const status = cell.latest?.status ?? (cell.submissionId ? "已交未批" : "未交");
   const hasScore =
     cell.latest?.finalScore !== null && cell.latest?.finalScore !== undefined;
+  const historyItems = historyData?.items ?? [];
+  const filteredHistory = historyItems.filter((item) => {
+    if (historyFilter === "all") return true;
+    return item.actionType === "model_answer_regen" || item.hasModelAnswer;
+  });
 
   return (
     <Sheet
@@ -213,6 +252,84 @@ export function CellDetailSheet({
           ) : null}
         </div>
 
+        <section className="rounded-lg border p-3">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-medium">历史记录</div>
+            <div className="flex items-center gap-1">
+              <Button
+                size="sm"
+                variant={historyFilter === "all" ? "default" : "outline"}
+                onClick={() => setHistoryFilter("all")}
+                disabled={historyFetching}
+              >
+                全体历史
+              </Button>
+              <Button
+                size="sm"
+                variant={historyFilter === "model_answer" ? "default" : "outline"}
+                onClick={() => setHistoryFilter("model_answer")}
+                disabled={historyFetching}
+              >
+                范文历史
+              </Button>
+            </div>
+          </div>
+          {historyFetching ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" />
+              正在加载历史…
+            </div>
+          ) : filteredHistory.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {historyFilter === "model_answer"
+                ? "暂无范文重生相关历史"
+                : "暂无历史记录"}
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {filteredHistory.map((item) => {
+                const actionLabel =
+                  item.actionType === "followup"
+                    ? "追问修订"
+                    : item.actionType === "model_answer_regen"
+                      ? "重生范文"
+                      : "常规批改";
+                return (
+                  <div
+                    key={item.gradingTaskId}
+                    className="rounded-md border bg-muted/20 p-2 text-xs"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">r{item.revision}</Badge>
+                      <Badge variant="secondary">{actionLabel}</Badge>
+                      <Badge>{item.status}</Badge>
+                      {item.hasModelAnswer ? (
+                        <Badge variant="info">含范文</Badge>
+                      ) : null}
+                      {typeof item.finalScore === "number" ? (
+                        <span className="font-mono text-muted-foreground">
+                          {item.finalScore}
+                          {typeof item.maxScore === "number"
+                            ? ` / ${item.maxScore}`
+                            : ""}
+                        </span>
+                      ) : null}
+                    </div>
+                    {item.teacherInstruction ? (
+                      <p className="mt-1 line-clamp-2 text-muted-foreground">
+                        追问：{item.teacherInstruction}
+                      </p>
+                    ) : null}
+                    <p className="mt-1 text-muted-foreground/80">
+                      {new Date(item.updatedAt).toLocaleString()}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
         {/* 操作 */}
         <div className="flex gap-2">
           <Button
@@ -257,13 +374,16 @@ export function CellDetailSheet({
             </Button>
           ) : null}
         </div>
+        {question.provideModelAnswer ? (
+          <p className="text-xs text-muted-foreground">
+            「重生范文」会重新发起一次批改请求并附带新范文，分数可能发生轻微变化。
+          </p>
+        ) : null}
 
         {cell.latest ? (
-          <details className="rounded-md border p-3">
-            <summary className="cursor-pointer text-sm font-medium">
-              追问修订（页内）
-            </summary>
-            <div className="mt-2 space-y-2">
+          <section className="rounded-md border p-3">
+            <div className="mb-2 text-sm font-medium">追问修订</div>
+            <div className="space-y-2">
               <Textarea
                 rows={4}
                 value={followupText}
@@ -287,7 +407,7 @@ export function CellDetailSheet({
                 </Button>
               </div>
             </div>
-          </details>
+          </section>
         ) : null}
 
         {/* LLM 输出：feedback / 维度 / 转写 */}
@@ -357,14 +477,12 @@ export function CellDetailSheet({
               </section>
             ) : null}
             {result?.transcription ? (
-              <details className="rounded-md border p-2">
-                <summary className="cursor-pointer text-xs text-muted-foreground">
-                  模型转写后的正文
-                </summary>
-                <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap text-xs">
+              <section className="space-y-1 rounded-md border p-2">
+                <div className="text-xs text-muted-foreground">模型转写后的正文</div>
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-xs">
                   {result.transcription}
                 </pre>
-              </details>
+              </section>
             ) : null}
             {result?.modelAnswer ? (
               <section className="space-y-1">

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { Prisma } from "@prisma/client";
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -131,6 +132,82 @@ function safeArr(s: string | null): string[] {
   }
 }
 
+function summarizePreviousResult(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const r = JSON.parse(raw) as Record<string, unknown>;
+    const lines: string[] = [];
+    const finalScore = typeof r.final_score === "number" ? r.final_score : null;
+    const maxScore = typeof r.max_score === "number" ? r.max_score : null;
+    if (finalScore !== null) {
+      lines.push(`- 总分：${finalScore}${maxScore !== null ? ` / ${maxScore}` : ""}`);
+    }
+    if (Array.isArray(r.dimension_scores) && r.dimension_scores.length > 0) {
+      const dims = (r.dimension_scores as Array<Record<string, unknown>>)
+        .slice(0, 4)
+        .map((d) => {
+          const name = typeof d.name === "string" ? d.name : "维度";
+          const score = typeof d.score === "number" ? d.score : null;
+          const max = typeof d.max === "number" ? d.max : null;
+          if (score === null) return name;
+          return `${name} ${score}${max !== null ? `/${max}` : ""}`;
+        })
+        .join("、");
+      if (dims) lines.push(`- 维度：${dims}`);
+    }
+    if (typeof r.feedback === "string" && r.feedback.trim()) {
+      lines.push(`- 评语摘要：${r.feedback.trim().replace(/\s+/g, " ").slice(0, 120)}`);
+    }
+    return lines.length > 0 ? lines.join("\n") : null;
+  } catch {
+    return null;
+  }
+}
+
+async function createLocalTaskWithRetry(params: {
+  submissionId: string;
+  mode: "grade" | "revise";
+  actionType: "grade" | "followup" | "model_answer_regen";
+  teacherInstruction: string;
+  parentId: string | null;
+}) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const latest = await prisma.gradingTask.findFirst({
+      where: { submissionId: params.submissionId },
+      orderBy: { revision: "desc" },
+      select: { revision: true },
+    });
+    const revision = (latest?.revision ?? 0) + 1;
+    const idempotencyKey = makeIdempotencyKey(params.submissionId, revision);
+    try {
+      const local = await prisma.gradingTask.create({
+        data: {
+          submissionId: params.submissionId,
+          idempotencyKey,
+          revision,
+          mode: params.mode,
+          actionType: params.actionType,
+          teacherInstruction: params.teacherInstruction || null,
+          parentId: params.parentId,
+          status: "pending",
+          attempts: 1,
+        },
+      });
+      return { local, idempotencyKey };
+    } catch (e) {
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === "P2002" &&
+        attempt === 0
+      ) {
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error("创建本地任务失败，请稍后重试");
+}
+
 /**
  * 给一组 (submissionId) 提交批改。
  *
@@ -170,7 +247,17 @@ export async function gradeSubmissionsAction(
     include: {
       student: true,
       question: { include: { batch: true } },
-      gradings: { select: { revision: true } },
+      gradings: {
+        orderBy: { revision: "desc" },
+        take: 1,
+        select: {
+          id: true,
+          revision: true,
+          result: true,
+          finalScore: true,
+          maxScore: true,
+        },
+      },
     },
   });
 
@@ -182,25 +269,26 @@ export async function gradeSubmissionsAction(
       continue;
     }
 
-    const revision =
-      sub.gradings.length === 0
-        ? 1
-        : Math.max(...sub.gradings.map((g) => g.revision)) + 1;
-    const idempotencyKey = makeIdempotencyKey(sub.id, revision);
-
-    // 先在我方 DB 记一行 pending 任务，让 UI 立刻能反馈
-    const local = await prisma.gradingTask.create({
-      data: {
+    const latest = sub.gradings[0] ?? null;
+    let local;
+    let idempotencyKey;
+    try {
+      const created = await createLocalTaskWithRetry({
         submissionId: sub.id,
-        idempotencyKey,
-        revision,
         mode,
         actionType,
-        teacherInstruction: teacherInstruction || null,
-        status: "pending",
-        attempts: 1,
-      },
-    });
+        teacherInstruction,
+        parentId: latest?.id ?? null,
+      });
+      local = created.local;
+      idempotencyKey = created.idempotencyKey;
+    } catch (e) {
+      result.failed++;
+      result.errors.push(
+        `${sub.student.name} 第${sub.question.index}题 → ${(e instanceof Error ? e.message : "创建任务失败").slice(0, 100)}`,
+      );
+      continue;
+    }
 
     try {
       const imageUrls = paths.map((p) => buildSignedImageUrl(p, 1800));
@@ -209,7 +297,11 @@ export async function gradeSubmissionsAction(
       const providerOverrides = buildProviderOverridesForQuestion(
         settings,
         sub.question.batch,
-        sub.question,
+        {
+          ...sub.question,
+          provideModelAnswer:
+            actionType === "model_answer_regen" ? true : sub.question.provideModelAnswer,
+        },
       );
 
       // 拼 question_context：题干（+ 给分细则 / 修改意见指引，如果填了）
@@ -224,8 +316,28 @@ export async function gradeSubmissionsAction(
       if (sub.question.feedbackGuide && sub.question.feedbackGuide.trim()) {
         ctxParts.push(`修改意见方向：\n${sub.question.feedbackGuide.trim()}`);
       }
+      if (actionType !== "grade" && latest) {
+        const prevSummary = summarizePreviousResult(latest.result);
+        if (prevSummary) {
+          ctxParts.push(
+            `上一轮批改结果（你的同事给出的，仅供你复核）：\n${prevSummary}`,
+          );
+        } else if (
+          typeof latest.finalScore === "number" ||
+          typeof latest.maxScore === "number"
+        ) {
+          ctxParts.push(
+            `上一轮批改结果（仅供你复核）：\n- 总分：${latest.finalScore ?? "?"}${latest.maxScore ? ` / ${latest.maxScore}` : ""}`,
+          );
+        }
+      }
       if (teacherInstruction) {
         ctxParts.push(`老师追问/补充要求：\n${teacherInstruction}`);
+      }
+      if (actionType === "model_answer_regen") {
+        ctxParts.push(
+          "本轮目标：优先重生成 model_answer（范文）。你可以重新判断分数，但请保持评语与判分标准一致、避免无依据的大幅波动。",
+        );
       }
       const ctx = ctxParts.join("\n\n");
 
