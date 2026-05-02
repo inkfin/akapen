@@ -17,6 +17,9 @@ dependencies = [
     # 业务工具
     "python-dotenv>=1.0",
     "pillow>=10.0",
+    # HEIC 解码：注册到 PIL 后 standardize_jpeg_bytes() 透明支持 .heic/.heif；
+    # 配合 Dockerfile 装的 libheif1 + libde265-0 系统包用。
+    "pillow-heif>=0.18",
     "pydantic>=2.7",
     # 模式 A · 离线 Gradio
     "gradio>=6.0,<7",

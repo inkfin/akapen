@@ -17,7 +17,13 @@ import logging
 from io import BytesIO
 from pathlib import Path
 
+import pillow_heif
 from PIL import Image, ImageOps
+
+# 注册 HEIC/HEIF 解码到 PIL —— 注册之后 Image.open() 自动识别 ftypheic / ftypmif1
+# 等容器（iPhone 默认相片格式）。下游 OCR / grading / agent 全部透明受益，不需要
+# 改任何业务代码。需要 Dockerfile 装 libheif1 + libde265-0 才能动态链接成功。
+pillow_heif.register_heif_opener()
 
 logger = logging.getLogger("img")
 
