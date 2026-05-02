@@ -44,6 +44,7 @@
     "review_flag": <boolean>,
     "review_reasons": ["<low_confidence / boundary_score / poor_handwriting / missing_evidence 等>"],
     "transcription": "<重复顶层 transcription 的值，让 grading 块自包含>",
+    "model_answer": "<可选：按老师要求给出的修改后范文，不需要时可省略或留空>",
     "notes": "<评分过程补充说明，可 null>"
   }
 }

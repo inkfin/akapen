@@ -45,6 +45,7 @@
   "review_flag": <boolean>,
   "review_reasons": ["<low_confidence / boundary_score / poor_ocr 等>"],
   "transcription": "<校对后正文，没看图就留空字符串>",
+  "model_answer": "<可选：按老师要求给出的修改后范文，不需要时可省略或留空>",
   "notes": "<可空>"
 }
 ```

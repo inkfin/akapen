@@ -35,12 +35,19 @@ import { substituteRubric } from "@/lib/model-catalog";
  */
 function buildProviderOverridesForQuestion(
   s: WebSettingsView,
+  batch: {
+    subject: string | null;
+    batchObjective: string | null;
+  },
   question: {
     requireGrading: boolean;
     rubric: string | null;
     feedbackGuide: string | null;
     customGradingPrompt: string | null;
     customSingleShotPrompt: string | null;
+    thinkingOverride: string | null;
+    provideModelAnswer: boolean;
+    modelAnswerGuide: string | null;
   },
 ): AkapenCreateTaskInput["providerOverrides"] {
   // 三层回落决定 effective feedback guide：
@@ -52,9 +59,14 @@ function buildProviderOverridesForQuestion(
     null;
 
   const subOpts = {
+    persona: s.defaultPersona,
+    batchSubject: batch.subject,
+    batchObjective: batch.batchObjective,
     requireGrading: question.requireGrading,
     rubric: question.rubric,
     feedbackGuide: effectiveFeedbackGuide,
+    provideModelAnswer: question.provideModelAnswer,
+    modelAnswerGuide: question.modelAnswerGuide,
   };
 
   // single-shot prompt：custom > settings.singleShotPrompt 替换 rubric > 不传
@@ -71,6 +83,14 @@ function buildProviderOverridesForQuestion(
       ? substituteRubric(s.gradingPrompt, subOpts)
       : undefined;
 
+  const thinkingOverride = (question.thinkingOverride ?? "").toLowerCase().trim();
+  const gradingThinking =
+    thinkingOverride === "force_on"
+      ? true
+      : thinkingOverride === "force_off"
+        ? false
+        : s.gradingThinking;
+
   return {
     provider: s.gradingProvider,
     model: s.gradingModel,
@@ -78,7 +98,7 @@ function buildProviderOverridesForQuestion(
     ocrModel: s.ocrModel,
     enableSingleShot: s.enableSingleShot,
     gradingWithImage: s.gradingWithImage,
-    gradingThinking: s.gradingThinking,
+    gradingThinking,
     ocrPrompt: s.ocrPrompt || undefined,
     gradingPrompt,
     singleShotPrompt,
@@ -165,6 +185,8 @@ export async function gradeSubmissionsAction(
         submissionId: sub.id,
         idempotencyKey,
         revision,
+        mode: "grade",
+        actionType: "grade",
         status: "pending",
         attempts: 1,
       },
@@ -176,6 +198,7 @@ export async function gradeSubmissionsAction(
       // 每题独立的 prompt overrides（注入 rubric 或走 customPrompt 覆盖）
       const providerOverrides = buildProviderOverridesForQuestion(
         settings,
+        sub.question.batch,
         sub.question,
       );
 
@@ -185,6 +208,14 @@ export async function gradeSubmissionsAction(
       // requireGrading=false 时不重复带"给分细则"段，避免 prompt 自相矛盾；
       // feedbackGuide 留空时也省略，让模型自己用默认 feedback 方向。
       const ctxParts: string[] = [sub.question.prompt];
+      const subject = (sub.question.batch.subject ?? "").trim();
+      const objective = (sub.question.batch.batchObjective ?? "").trim();
+      if (subject || objective) {
+        const lines: string[] = [];
+        if (subject) lines.push(`作业学科：${subject}`);
+        if (objective) lines.push(`作业目标：${objective}`);
+        ctxParts.push(lines.join("\n"));
+      }
       if (sub.question.requireGrading && sub.question.rubric && sub.question.rubric.trim()) {
         ctxParts.push(`本题给分细则：\n${sub.question.rubric.trim()}`);
       }
