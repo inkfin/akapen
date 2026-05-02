@@ -13,6 +13,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { StudentImageGrid } from "@/components/student-image-grid";
 
 import type { CellState } from "@/lib/grade-data";
 
@@ -297,22 +298,20 @@ export function CellDetailSheet({
           </div>
         ) : null}
 
-        {/* 图片：宽度撑满，高度 auto */}
+        {/* 图片：缩略图条 + 单击放大查看（lightbox） */}
         {cell.imagePaths.length > 0 ? (
           <div className="grid gap-2">
-            <div className="text-sm font-medium">学生答题图（{cell.imagePaths.length}）</div>
-            <div className="grid grid-cols-2 gap-2">
-              {cell.imagePaths.map((p) => (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
-                  key={p}
-                  src={`/api/uploads-preview?p=${encodeURIComponent(p)}`}
-                  alt={p}
-                  className="rounded-md border object-cover"
-                  style={{ aspectRatio: "3/4" }}
-                />
-              ))}
+            <div className="text-sm font-medium">
+              学生答题图（{cell.imagePaths.length}）
+              <span className="ml-1 text-xs font-normal text-muted-foreground">
+                · 单击放大
+              </span>
             </div>
+            {/* 抽屉宽度有限，桌面也只放 2 列保持图够大 */}
+            <StudentImageGrid
+              paths={cell.imagePaths}
+              className="grid-cols-2 sm:grid-cols-2"
+            />
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
