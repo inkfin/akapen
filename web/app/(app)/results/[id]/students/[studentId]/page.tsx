@@ -354,6 +354,16 @@ function QuestionCard({ q }: { q: StudentReportQuestion }) {
             </pre>
           </details>
         ) : null}
+        {q.result.modelAnswer ? (
+          <details className="rounded-md border p-2">
+            <summary className="cursor-pointer text-xs text-muted-foreground">
+              修改后范文
+            </summary>
+            <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap text-xs">
+              {q.result.modelAnswer}
+            </pre>
+          </details>
+        ) : null}
         {q.imagePaths.length > 0 ? (
           <details className="rounded-md border p-2 print:hidden">
             <summary className="cursor-pointer text-xs text-muted-foreground">

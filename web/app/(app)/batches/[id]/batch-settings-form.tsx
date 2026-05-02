@@ -26,7 +26,7 @@ export function BatchSettingsForm({
     id: string;
     title: string;
     notes: string | null;
-    subject: string | null;
+    batchSubject: string | null;
     batchObjective: string | null;
   };
 }) {
@@ -48,8 +48,8 @@ export function BatchSettingsForm({
         <Label htmlFor="batch-subject">学科（可选）</Label>
         <Input
           id="batch-subject"
-          name="subject"
-          defaultValue={batch.subject ?? ""}
+          name="batchSubject"
+          defaultValue={batch.batchSubject ?? ""}
           placeholder="语文 / 英语 / 数学"
         />
       </div>

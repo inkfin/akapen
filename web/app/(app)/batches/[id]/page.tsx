@@ -64,10 +64,10 @@ export default async function BatchDetailPage({
             <p className="text-sm text-muted-foreground">
               {batch.class.name} · {batch.class._count.students} 名学生 · {batch.questions.length} 题
             </p>
-            {batch.subject || batch.batchObjective ? (
+            {batch.batchSubject || batch.batchObjective ? (
               <p className="mt-1 text-xs text-muted-foreground">
-                {batch.subject ? `学科：${batch.subject}` : ""}
-                {batch.subject && batch.batchObjective ? " · " : ""}
+                {batch.batchSubject ? `学科：${batch.batchSubject}` : ""}
+                {batch.batchSubject && batch.batchObjective ? " · " : ""}
                 {batch.batchObjective ? `目标：${batch.batchObjective}` : ""}
               </p>
             ) : null}
@@ -92,23 +92,25 @@ export default async function BatchDetailPage({
         </div>
       </div>
 
-      <details className="rounded-md border p-3">
-        <summary className="cursor-pointer text-sm font-medium">
-          作业设置（页内编辑）
-        </summary>
-        <p className="mt-1 mb-3 text-xs text-muted-foreground">
-          这里配置作业级上下文（学科/目标/备注），不用额外弹窗或抽屉。
-        </p>
-        <BatchSettingsForm
-          batch={{
-            id: batch.id,
-            title: batch.title,
-            notes: batch.notes,
-            subject: batch.subject,
-            batchObjective: batch.batchObjective,
-          }}
-        />
-      </details>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">作业设置（页内编辑）</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            这里配置作业级上下文（学科/目标/备注），不用额外弹窗或抽屉。
+          </p>
+        </CardHeader>
+        <CardContent>
+          <BatchSettingsForm
+            batch={{
+              id: batch.id,
+              title: batch.title,
+              notes: batch.notes,
+              batchSubject: batch.batchSubject,
+              batchObjective: batch.batchObjective,
+            }}
+          />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="flex-row items-center justify-between">

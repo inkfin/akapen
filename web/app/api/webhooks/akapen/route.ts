@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { prisma } from "@/lib/db";
 import { verifyWebhookSignature } from "@/lib/hmac";
+import { extractPromptSuggestionFromResult } from "@/lib/prompt-suggestion";
 
 /**
  * akapen-backend → web 的回调入口。
@@ -113,11 +114,16 @@ export async function POST(req: Request) {
           : "running";
 
   try {
+    const parsedSuggestion =
+      local.actionType === "followup" && payload.result
+        ? extractPromptSuggestionFromResult(payload.result)
+        : null;
     await prisma.gradingTask.update({
       where: { id: local.id },
       data: {
         status: localStatus,
         result: payload.result ? JSON.stringify(payload.result) : null,
+        promptSuggestion: parsedSuggestion,
         finalScore:
           payload.result && typeof payload.result.final_score === "number"
             ? payload.result.final_score

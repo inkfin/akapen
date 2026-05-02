@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, Loader2, Play, RefreshCw, Sparkles } from "lucide-react";
+import { Eye, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -127,6 +127,20 @@ export function GradeBoard({
     return m;
   }, [data]);
 
+  const submissionMeta = useMemo(() => {
+    const m = new Map<string, { provideModelAnswer: boolean }>();
+    if (!data) return m;
+    for (const q of data.questions) {
+      for (const s of data.students) {
+        const c = data.cells[q.id]?.[s.id];
+        if (c?.submissionId) {
+          m.set(c.submissionId, { provideModelAnswer: q.provideModelAnswer });
+        }
+      }
+    }
+    return m;
+  }, [data]);
+
   function toggle(submissionId: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -175,11 +189,19 @@ export function GradeBoard({
   }
 
   const submitMut = useMutation({
-    mutationFn: async (ids: string[]) => {
+    mutationFn: async (payload: {
+      ids: string[];
+      actionType?: "grade" | "followup" | "model_answer_regen";
+      teacherInstruction?: string;
+    }) => {
       const r = await fetch("/api/grade/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ submissionIds: ids }),
+        body: JSON.stringify({
+          submissionIds: payload.ids,
+          actionType: payload.actionType ?? "grade",
+          teacherInstruction: payload.teacherInstruction,
+        }),
       });
       if (!r.ok) {
         const e = await r.json().catch(() => ({}));
@@ -191,8 +213,10 @@ export function GradeBoard({
         errors: string[];
       };
     },
-    onSuccess: (res, ids) => {
-      if (res.ok > 0) toast.success(`已提交 ${res.ok} 项批改`);
+    onSuccess: (res, payload) => {
+      const actionLabel =
+        payload.actionType === "model_answer_regen" ? "范文重生" : "批改";
+      if (res.ok > 0) toast.success(`已提交 ${res.ok} 项${actionLabel}`);
       if (res.failed > 0) {
         toast.error(`${res.failed} 项失败：\n${res.errors.slice(0, 3).join("\n")}`);
       }
@@ -244,7 +268,7 @@ export function GradeBoard({
         <Button
           size="sm"
           disabled={selected.size === 0 || submitMut.isPending}
-          onClick={() => submitMut.mutate(Array.from(selected))}
+          onClick={() => submitMut.mutate({ ids: Array.from(selected), actionType: "grade" })}
         >
           {submitMut.isPending ? (
             <Loader2 className="size-4 animate-spin" />
@@ -252,6 +276,31 @@ export function GradeBoard({
             <Sparkles className="size-4" />
           )}
           一键批改
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={selected.size === 0 || submitMut.isPending}
+          onClick={() => {
+            const regenIds = Array.from(selected).filter(
+              (id) => submissionMeta.get(id)?.provideModelAnswer === true,
+            );
+            if (regenIds.length === 0) {
+              toast.error("所选题目都没开启「输出范文」，无法批量重生范文");
+              return;
+            }
+            submitMut.mutate({
+              ids: regenIds,
+              actionType: "model_answer_regen",
+            });
+          }}
+        >
+          {submitMut.isPending ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Sparkles className="size-4" />
+          )}
+          批量重生范文
         </Button>
       </div>
 

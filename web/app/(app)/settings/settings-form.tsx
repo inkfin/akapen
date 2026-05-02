@@ -24,6 +24,7 @@ import {
   DEFAULT_PROMPT_SINGLE_SHOT,
   GRADING_MODELS,
   OCR_MODELS,
+  PERSONA_PLACEHOLDER,
   RUBRIC_PLACEHOLDER,
   findGradingModel,
   findOcrModel,
@@ -49,8 +50,17 @@ export function SettingsForm({ initial }: { initial: WebSettingsView }) {
   function onSave() {
     startTransition(async () => {
       const r = await updateWebSettingsAction(s);
-      if (r.ok) toast.success("设置已保存");
-      else toast.error(`保存失败：${r.error ?? "unknown"}`);
+      if (r.ok) {
+        toast.success("设置已保存");
+        const hasPersonaPlaceholder =
+          s.gradingPrompt.includes(PERSONA_PLACEHOLDER) ||
+          s.singleShotPrompt.includes(PERSONA_PLACEHOLDER);
+        if (!hasPersonaPlaceholder && s.defaultPersona.trim()) {
+          toast.info(
+            `人设已保存，但当前提示词里没有 ${PERSONA_PLACEHOLDER} 占位符，所以暂不会生效`,
+          );
+        }
+      } else toast.error(`保存失败：${r.error ?? "unknown"}`);
     });
   }
 

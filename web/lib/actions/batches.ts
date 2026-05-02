@@ -18,7 +18,7 @@ const batchCreate = z.object({
   classId: z.string().min(1),
   title: z.string().min(1).max(128),
   notes: optionalText(2000),
-  subject: optionalText(64),
+  batchSubject: optionalText(128),
   batchObjective: optionalText(2000),
 });
 
@@ -31,7 +31,7 @@ export async function createBatchAction(
     classId: formData.get("classId"),
     title: formData.get("title"),
     notes: formData.get("notes"),
-    subject: formData.get("subject"),
+    batchSubject: formData.get("batchSubject"),
     batchObjective: formData.get("batchObjective"),
   });
   if (!parsed.success) return { error: "请选择班级并填写标题" };
@@ -42,7 +42,7 @@ export async function createBatchAction(
       ownerId: userId,
       title: parsed.data.title.trim(),
       notes: parsed.data.notes.trim() || null,
-      subject: parsed.data.subject.trim() || null,
+      batchSubject: parsed.data.batchSubject.trim() || null,
       batchObjective: parsed.data.batchObjective.trim() || null,
     },
   });
@@ -54,7 +54,7 @@ const batchUpdate = z.object({
   id: z.string().min(1),
   title: z.string().min(1).max(128),
   notes: optionalText(2000),
-  subject: optionalText(64),
+  batchSubject: optionalText(128),
   batchObjective: optionalText(2000),
 });
 
@@ -67,7 +67,7 @@ export async function updateBatchAction(
     id: formData.get("id"),
     title: formData.get("title"),
     notes: formData.get("notes"),
-    subject: formData.get("subject"),
+    batchSubject: formData.get("batchSubject"),
     batchObjective: formData.get("batchObjective"),
   });
   if (!parsed.success) return { error: "作业设置无效" };
@@ -77,7 +77,7 @@ export async function updateBatchAction(
     data: {
       title: parsed.data.title.trim(),
       notes: parsed.data.notes.trim() || null,
-      subject: parsed.data.subject.trim() || null,
+      batchSubject: parsed.data.batchSubject.trim() || null,
       batchObjective: parsed.data.batchObjective.trim() || null,
     },
   });
@@ -117,6 +117,11 @@ const requireGradingSchema = z.preprocess((v) => {
   return s === "on" || s === "true" || s === "1" || s === "yes";
 }, z.boolean());
 
+const thinkingOverrideSchema = z.preprocess((v) => {
+  if (v === undefined || v === null) return "";
+  return String(v).trim().toLowerCase();
+}, z.enum(["", "force_on", "force_off"]));
+
 const questionCreate = z
   .object({
     batchId: z.string().min(1),
@@ -125,7 +130,7 @@ const questionCreate = z
     requireGrading: requireGradingSchema,
     rubric: optionalText(4000),
     feedbackGuide: optionalText(4000),
-    thinkingOverride: optionalText(32),
+    thinkingOverride: thinkingOverrideSchema,
     provideModelAnswer: z.preprocess((v) => {
       if (typeof v === "boolean") return v;
       if (v === undefined || v === null) return false;
