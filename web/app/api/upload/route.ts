@@ -80,8 +80,7 @@ export async function POST(req: Request) {
     if (!type) {
       return NextResponse.json(
         {
-          error:
-            `${f.name} 不是支持的图片格式（仅 JPEG / PNG / WebP；HEIC 请把相机设置改成"兼容性最好"再上传）`,
+          error: `${f.name} 不是支持的图片格式（仅 JPEG / PNG / WebP / HEIC）`,
         },
         { status: 415 },
       );

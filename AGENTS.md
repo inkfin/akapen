@@ -475,6 +475,21 @@ service `web` 与 `backend` 并列。
   按需加）。
 - ❌ **不要在 client component 里直接 import server action**：用
   `/api/grade/submit` 这类 fetch wrapper，给 react-query 一个统一的错误处理路径。
+- ❌ **不要把 `File` 原样塞进 `FormData` 上传**：必须先过 `web/lib/image-compress.ts`
+  的 `compressImage()` / `compressImages()`。原因：iPhone 直拍 3~5 MB JPEG，
+  老师 4G 上行要 30~60s 才能上传一张；前端 canvas 缩到 1280px 长边 + JPEG 70%
+  后只剩 ~300 KB，3~5s 完成，体验差距巨大。helper 内部对 < 200 KB / HEIC /
+  压缩失败都会自动 fallback 到原 file，调用方无需关心错误处理。HEIC 格式
+  backend 已支持（`core/imageproc` 注册了 `pillow-heif`），不需要前端转格式，
+  只需要 `<input accept>` 用 `web/lib/uploads.ts:UPLOAD_ACCEPT` 常量保证一致。
+- ❌ **不要给新对话框直接用 shadcn `Dialog`**：移动端键盘弹起会顶飞 Dialog、
+  两边白边浪费屏幕。改用 `web/components/ui/responsive-dialog.tsx` 的
+  `ResponsiveDialog` 系列（API 与 shadcn `Dialog` 一致，桌面照样走 Dialog、
+  移动端自动切到 vaul `Drawer` 底部上滑）。纯桌面后台页（不在手机访问）才
+  例外。
+- ❌ **不要用 `group-hover:` 显隐操作按钮**：触屏设备根本没有 hover 状态，
+  老师在手机上**永远点不到**。删除 / 编辑这类操作图标必须始终可见
+  （半透明背景 + 主图标即可保持视觉清爽）。
 
 ### 11.5 `web/` 烟测
 
