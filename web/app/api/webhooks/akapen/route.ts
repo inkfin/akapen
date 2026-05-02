@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { prisma } from "@/lib/db";
 import { verifyWebhookSignature } from "@/lib/hmac";
+import { extractPromptSuggestionFromResult } from "@/lib/prompt-suggestion";
 
 /**
  * akapen-backend → web 的回调入口。
@@ -68,38 +69,6 @@ const payloadSchema = z.object({
   timestamp: z.string(),
 });
 
-function normalizeSuggestion(value: unknown): string | null {
-  if (!value) return null;
-  if (typeof value === "string") {
-    const text = value.trim();
-    if (!text) return null;
-    return JSON.stringify({ reason: text });
-  }
-  if (typeof value === "object") {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-function extractPromptSuggestion(
-  result: Record<string, unknown> | null | undefined,
-): string | null {
-  if (!result || typeof result !== "object") return null;
-  // single-shot 主路径下 suggestion 在 result.grading.*；普通 grading 走顶层。
-  const grading = result.grading;
-  if (grading && typeof grading === "object") {
-    const nested = normalizeSuggestion(
-      (grading as Record<string, unknown>).prompt_suggestion,
-    );
-    if (nested) return nested;
-  }
-  return normalizeSuggestion(result.prompt_suggestion);
-}
-
 export async function POST(req: Request) {
   // 一定要拿原始 body 字符串，不能用 .json()——签名是对原始 bytes 算的
   const rawBody = await req.text();
@@ -151,7 +120,7 @@ export async function POST(req: Request) {
         status: localStatus,
         result: payload.result ? JSON.stringify(payload.result) : null,
         promptSuggestion: payload.result
-          ? extractPromptSuggestion(payload.result)
+          ? extractPromptSuggestionFromResult(payload.result)
           : null,
         finalScore:
           payload.result && typeof payload.result.final_score === "number"

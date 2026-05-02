@@ -15,7 +15,7 @@
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Deduction(BaseModel):
@@ -46,8 +46,8 @@ class PromptSuggestion(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    reason: str = Field(
-        default="",
+    reason: str | None = Field(
+        default=None,
         description="为什么建议修改 prompt（如 rubric 歧义、反馈方向过宽）",
     )
     suggested_rubric: str | None = Field(
@@ -58,6 +58,21 @@ class PromptSuggestion(BaseModel):
         default=None,
         description="建议替换后的题目修改意见方向（可空）",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_keys(cls, value):
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        if "suggestedRubric" in data and "suggested_rubric" not in data:
+            data["suggested_rubric"] = data["suggestedRubric"]
+        if (
+            "suggestedFeedbackGuide" in data
+            and "suggested_feedback_guide" not in data
+        ):
+            data["suggested_feedback_guide"] = data["suggestedFeedbackGuide"]
+        return data
 
 
 class GradingResult(BaseModel):
@@ -122,6 +137,23 @@ class GradingResult(BaseModel):
         default=None,
         description="可选：仅在老师开启“追问后建议优化 prompt”时返回",
     )
+
+    @field_validator("prompt_suggestion", mode="before")
+    @classmethod
+    def _coerce_prompt_suggestion(cls, value):
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            text = value.strip()
+            if text == "":
+                return None
+            return {"reason": text}
+        if isinstance(value, list):
+            parts = [str(x).strip() for x in value if str(x).strip()]
+            if not parts:
+                return None
+            return {"reason": " / ".join(parts)}
+        return value
 
 
 class SingleShotResult(BaseModel):
