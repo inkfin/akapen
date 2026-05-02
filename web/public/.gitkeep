@@ -1,0 +1,3 @@
+# Next.js standalone build 在 docker 里需要 web/public 目录存在（Dockerfile
+# `COPY --from=build /app/public ./public`），但项目本身没有静态资源。
+# 留一个 .gitkeep 让目录不被 git 忽略，避免 build cache miss 时 COPY 失败。

@@ -133,6 +133,66 @@ export async function POST(req: Request) {
   });
 }
 
+// 调整页序：传 { submissionId, imagePaths } —— imagePaths 必须是旧集合的
+// 一个 permutation（不允许通过 PATCH 增删，只能改顺序）。这层校验避免 client
+// 因 race / bug 同时丢图 + 改序。增删走 POST / DELETE。
+export async function PATCH(req: Request) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "未登录" }, { status: 401 });
+  }
+  const body = (await req.json().catch(() => ({}))) as {
+    submissionId?: unknown;
+    imagePaths?: unknown;
+  };
+  const submissionId = String(body?.submissionId ?? "");
+  const rawPaths = Array.isArray(body?.imagePaths) ? body.imagePaths : null;
+  const newPaths: string[] | null =
+    rawPaths && rawPaths.every((p): p is string => typeof p === "string")
+      ? (rawPaths as string[])
+      : null;
+  if (!submissionId || !newPaths) {
+    return NextResponse.json({ error: "缺少字段" }, { status: 400 });
+  }
+
+  const submission = await prisma.submission.findUnique({
+    where: { id: submissionId },
+    include: {
+      question: { include: { batch: { select: { ownerId: true } } } },
+    },
+  });
+  if (!submission || submission.question.batch.ownerId !== session.user.id) {
+    return NextResponse.json({ error: "无权操作" }, { status: 404 });
+  }
+
+  const old: string[] = safeParseStringArray(submission.imagePaths);
+  // 集合相等校验（数量 + 元素一致），multiset 严格匹配
+  if (newPaths.length !== old.length) {
+    return NextResponse.json({ error: "图集变化，请刷新重试" }, { status: 409 });
+  }
+  const sorted = (xs: string[]) => [...xs].sort();
+  const a = sorted(old);
+  const b = sorted(newPaths);
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) {
+      return NextResponse.json(
+        { error: "图集变化，请刷新重试" },
+        { status: 409 },
+      );
+    }
+  }
+  // 顺序没变就不写库（省一次 sqlite write）
+  if (old.every((p, i) => p === newPaths[i])) {
+    return NextResponse.json({ imagePaths: old });
+  }
+
+  await prisma.submission.update({
+    where: { id: submissionId },
+    data: { imagePaths: JSON.stringify(newPaths) },
+  });
+  return NextResponse.json({ imagePaths: newPaths });
+}
+
 // 删除单张图：传 path 字符串，从 Submission.imagePaths 里去掉，并删盘上的文件。
 export async function DELETE(req: Request) {
   const session = await auth();
