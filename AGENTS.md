@@ -448,7 +448,8 @@ service `web` 与 `backend` 并列。
 | `web/app/api/webhooks/akapen/` | akapen → web 的回调入口（HMAC 验签 + 落库） |
 | `web/app/api/grade/{status,submit,retry}/` | 大盘轮询 + 批改提交 + 重试 HTTP wrapper |
 | `web/app/u/[token]/` | 给 akapen 容器拉图的签名 URL（HMAC 鉴权） |
-| `web/lib/auth.ts` / `auth.config.ts` | NextAuth v5（edge-safe config + 完整 config 分离） |
+| `web/app/logout/route.ts` | GET/POST 退出登录的稳定 URL（NextAuth v5 默认 `/api/auth/signout` 不响应 GET，老师地址栏访问 404） |
+| `web/lib/auth.ts` / `auth.config.ts` | NextAuth v5（edge-safe config + 完整 config 分离）。`lib/auth.ts:jwt` 每 5 分钟核对 `token.userId` 仍在 DB 里，stale 则返 null 清 session（防御 web.db 备份恢复 / 重建后老师 cookie 里 userId 不存在导致 P2003 FK 暴雷） |
 | `web/lib/db.ts` | Prisma client singleton（dev 防 hot reload 多实例） |
 | `web/lib/akapen.ts` | akapen HTTP 客户端（创建任务 / 查状态 / 重试 + 退避） |
 | `web/lib/hmac.ts` | 三种 HMAC 用法集中地（图片签名 / webhook 验签 / base64url） |

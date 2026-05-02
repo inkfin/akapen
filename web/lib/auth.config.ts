@@ -20,6 +20,11 @@ const authConfig = {
       const path = nextUrl.pathname;
       // 公共：登录页本身、签名图片 URL、健康检查、NextAuth 自家路由
       if (path === "/login") return true;
+      // /logout 必须无条件放行——stale-JWT 场景下用户已被 jwt callback
+      // 清 session（auth?.user 为 null），还得让 /logout 的 server component
+      // 跑完 signOut 把 cookie 也清干净，否则用户会反复"看似已登录但所有
+      // 操作都失败"。
+      if (path === "/logout") return true;
       if (path.startsWith("/u/")) return true;
       if (path.startsWith("/api/health")) return true;
       if (path.startsWith("/api/webhooks/")) return true;
