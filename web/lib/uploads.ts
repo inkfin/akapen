@@ -1,15 +1,29 @@
 import path from "node:path";
 
 /**
- * 上传配置 + 图片格式守门员（pure JS magic-byte sniff，不依赖 sharp / file-type）。
+ * 上传 server-only 配置。
  *
  * 设计取舍：
  * - 不在 web 容器里给图片做 EXIF/resize/quality 处理：那是 akapen 的活
  *   （core/imageproc.standardize_jpeg_bytes）。web 只负责存原图。
  *   这样 web 镜像不用塞 sharp / libvips / libheif，省 50MB+。
- * - 拒绝 HEIC：iPhone 默认输出 HEIC，但 PIL 不解（除非装 pillow-heif）。
- *   提示老师把相机设置改 "兼容性最好" / "JPEG"，比工程消化它便宜。
- *   后续若要支持 HEIC，可以在前端浏览器侧用 heic2any 转，再上传。
+ * - **接收 HEIC**：iPhone 老师从相册里选已存照片（AirDrop / 微信存的题目图）
+ *   大概率是 HEIC。backend 侧 `core/imageproc.py` 已经注册了 `pillow-heif`
+ *   解码器（依赖 Dockerfile 装的 `libheif1 + libde265-0`），下游 grading /
+ *   agent 全程透明转 JPEG。web 这边只负责识别 + 落盘原始 HEIC 字节，不做
+ *   格式转换 —— 把"重编码 / 质量"统一交给 backend 的 standardize_jpeg_bytes，
+ *   省得 web 也装一份 libheif。
+ * - 前端图片**压缩**走 `web/lib/image-compress.ts`，不走这里。这里只管
+ *   "服务端目录、上限、文件落盘"几件事。
+ *
+ * 文件拆分约定：
+ * - `uploads-shared.ts` —— 客户端 + 服务端共用的纯逻辑（detectImageType /
+ *   mimeOf / UPLOAD_ACCEPT 等）。client component 必须从那里 import；从
+ *   本文件 import 会因为顶部的 `node:path` / `process.env` 在 client bundle
+ *   中报错。
+ * - 本文件 —— server-only：UPLOAD_ROOT / 上传上限等需要 fs / env 的常量。
+ *   保留对 shared 模块的 re-export，让既有 server 端 `import { detectImageType
+ *   } from "@/lib/uploads"` 不破坏。
  */
 
 export const UPLOAD_ROOT =
@@ -25,48 +39,14 @@ export const MAX_IMAGES_PER_SUBMISSION = parseInt(
   10,
 );
 
-export type ImageType = "jpeg" | "png" | "webp";
-
-export function detectImageType(bytes: Uint8Array): ImageType | null {
-  if (bytes.length < 12) return null;
-  // JPEG: FF D8 FF
-  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "jpeg";
-  // PNG: 89 50 4E 47
-  if (
-    bytes[0] === 0x89 &&
-    bytes[1] === 0x50 &&
-    bytes[2] === 0x4e &&
-    bytes[3] === 0x47
-  )
-    return "png";
-  // WebP: "RIFF" .... "WEBP"
-  if (
-    bytes[0] === 0x52 &&
-    bytes[1] === 0x49 &&
-    bytes[2] === 0x46 &&
-    bytes[3] === 0x46 &&
-    bytes[8] === 0x57 &&
-    bytes[9] === 0x45 &&
-    bytes[10] === 0x42 &&
-    bytes[11] === 0x50
-  )
-    return "webp";
-  return null;
-}
-
-export function extOf(t: ImageType): string {
-  return t === "jpeg" ? "jpg" : t;
-}
-
-export function mimeOf(t: ImageType): string {
-  return t === "jpeg" ? "image/jpeg" : `image/${t}`;
-}
-
-/** 反推：从文件名（带扩展）猜 MIME，给 /u/[token] 输出 Content-Type 用 */
-export function mimeFromFilename(name: string): string {
-  const lower = name.toLowerCase();
-  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-  if (lower.endsWith(".png")) return "image/png";
-  if (lower.endsWith(".webp")) return "image/webp";
-  return "application/octet-stream";
-}
+// Re-export client-safe API：让既有 server 端 import { detectImageType, ... }
+// from "@/lib/uploads" 继续生效。新写 client component 直接 import from
+// "@/lib/uploads-shared"。
+export {
+  type ImageType,
+  detectImageType,
+  extOf,
+  mimeOf,
+  mimeFromFilename,
+  UPLOAD_ACCEPT,
+} from "./uploads-shared";
