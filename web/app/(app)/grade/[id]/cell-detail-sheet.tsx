@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, RefreshCw, Sparkles } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -71,6 +71,9 @@ export function CellDetailSheet({
   const [followupText, setFollowupText] = useState("");
   const [historyFilter, setHistoryFilter] = useState<"all" | "model_answer">("all");
   const [optimizePrompt, setOptimizePrompt] = useState(false);
+  const [selectedHistoryTaskId, setSelectedHistoryTaskId] = useState<string | null>(
+    cell.latest?.gradingTaskId ?? null,
+  );
 
   type HistoryItem = {
     gradingTaskId: string;
@@ -89,11 +92,11 @@ export function CellDetailSheet({
   // 没用 refetchInterval：result 拿到就不会变（重批走新 GradingTask），
   // 没必要轮询；status / 重试由父组件的大盘轮询管。
   const { data: result, isFetching } = useQuery({
-    queryKey: ["grade-result", cell.latest?.gradingTaskId],
+    queryKey: ["grade-result", selectedHistoryTaskId],
     queryFn: async (): Promise<ResultPayload | null> => {
-      if (!cell.latest) return null;
+      if (!selectedHistoryTaskId) return null;
       const r = await fetch(
-        `/api/grade/result?id=${encodeURIComponent(cell.latest.gradingTaskId)}`,
+        `/api/grade/result?id=${encodeURIComponent(selectedHistoryTaskId)}`,
         { cache: "no-store" },
       );
       if (!r.ok) {
@@ -102,7 +105,7 @@ export function CellDetailSheet({
       }
       return (await r.json()) as ResultPayload;
     },
-    enabled: !!cell.latest && cell.latest.status === "succeeded",
+    enabled: !!selectedHistoryTaskId,
     staleTime: 60_000,
   });
 
@@ -189,7 +192,7 @@ export function CellDetailSheet({
           .filter(Boolean)
           .join(" + ")}）`,
       );
-      qc.invalidateQueries({ queryKey: ["grade-result", cell.latest?.gradingTaskId] });
+      qc.invalidateQueries({ queryKey: ["grade-result", selectedHistoryTaskId] });
       qc.invalidateQueries({ queryKey: ["grade-history", cell.submissionId] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -217,15 +220,57 @@ export function CellDetailSheet({
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const status = cell.latest?.status ?? (cell.submissionId ? "已交未批" : "未交");
-  const hasScore =
-    cell.latest?.finalScore !== null && cell.latest?.finalScore !== undefined;
-  const historyItems = historyData?.items ?? [];
-  const filteredHistory = historyItems.filter((item) => {
-    if (historyFilter === "all") return true;
-    return item.actionType === "model_answer_regen" || item.hasModelAnswer;
+  const markReviewedMut = useMutation({
+    mutationFn: async () => {
+      if (!selectedHistoryTaskId) throw new Error("没有可操作的任务");
+      const r = await fetch("/api/grade/mark-reviewed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gradingTaskId: selectedHistoryTaskId }),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error(e.error ?? `HTTP ${r.status}`);
+      }
+      return r.json();
+    },
+    onSuccess: () => {
+      toast.success("已标记为已复核");
+      qc.invalidateQueries({ queryKey: ["grade-board", batchId] });
+      qc.invalidateQueries({ queryKey: ["grade-result", selectedHistoryTaskId] });
+      qc.invalidateQueries({ queryKey: ["grade-history", cell.submissionId] });
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
+
+  const status = cell.latest?.status ?? (cell.submissionId ? "已交未批" : "未交");
+  const historyItems = historyData?.items ?? [];
+  const filteredHistory = useMemo(
+    () =>
+      historyItems.filter((item) => {
+        if (historyFilter === "all") return true;
+        return item.actionType === "model_answer_regen" || item.hasModelAnswer;
+      }),
+    [historyItems, historyFilter],
+  );
+  const selectedHistoryItem = historyItems.find((x) => x.gradingTaskId === selectedHistoryTaskId);
+  const hasScore = result?.finalScore !== null && result?.finalScore !== undefined;
   const suggestion = parseSuggestion(result?.promptSuggestion ?? null);
+
+  useEffect(() => {
+    setSelectedHistoryTaskId(cell.latest?.gradingTaskId ?? null);
+  }, [cell.latest?.gradingTaskId]);
+
+  useEffect(() => {
+    if (filteredHistory.length === 0) return;
+    if (!selectedHistoryTaskId) {
+      setSelectedHistoryTaskId(filteredHistory[0].gradingTaskId);
+      return;
+    }
+    if (!filteredHistory.some((x) => x.gradingTaskId === selectedHistoryTaskId)) {
+      setSelectedHistoryTaskId(filteredHistory[0].gradingTaskId);
+    }
+  }, [filteredHistory, selectedHistoryTaskId]);
 
   return (
     <Sheet
@@ -264,6 +309,10 @@ export function CellDetailSheet({
             {cell.latest?.revision && cell.latest.revision > 1 ? (
               <Badge variant="outline">第 {cell.latest.revision} 次</Badge>
             ) : null}
+            {selectedHistoryItem &&
+            selectedHistoryItem.gradingTaskId !== cell.latest?.gradingTaskId ? (
+              <Badge variant="secondary">正在查看 r{selectedHistoryItem.revision}</Badge>
+            ) : null}
             {cell.latest?.status === "succeeded" && !hasScore ? (
               question.requireGrading ? (
                 <Badge variant="destructive">应打未打</Badge>
@@ -274,10 +323,10 @@ export function CellDetailSheet({
           </div>
           {hasScore ? (
             <div className="text-2xl font-semibold">
-              {cell.latest!.finalScore}
-              {cell.latest!.maxScore ? (
+              {result!.finalScore}
+              {result!.maxScore ? (
                 <span className="text-base text-muted-foreground">
-                  {" / "}{cell.latest!.maxScore}
+                  {" / "}{result!.maxScore}
                 </span>
               ) : (
                 <span className="text-base text-muted-foreground"> 分</span>
@@ -289,6 +338,18 @@ export function CellDetailSheet({
               {cell.latest.errorCode ? `[${cell.latest.errorCode}] ` : ""}
               {cell.latest.errorMessage}
             </p>
+          ) : null}
+          {cell.latest?.reviewFlag ? (
+            <div className="mt-2 flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => markReviewedMut.mutate()}
+                disabled={markReviewedMut.isPending}
+              >
+                {markReviewedMut.isPending ? "处理中…" : "已复核，去掉标记"}
+              </Button>
+            </div>
           ) : null}
         </div>
 
@@ -326,7 +387,7 @@ export function CellDetailSheet({
                 : "暂无历史记录"}
             </p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1">
               {filteredHistory.map((item) => {
                 const actionLabel =
                   item.actionType === "followup"
@@ -335,11 +396,17 @@ export function CellDetailSheet({
                       ? "重生范文"
                       : "常规批改";
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={item.gradingTaskId}
-                    className="rounded-md border bg-muted/20 p-2 text-xs"
+                    onClick={() => setSelectedHistoryTaskId(item.gradingTaskId)}
+                    className={`w-full rounded-md border px-2 py-1 text-left text-xs transition-colors ${
+                      selectedHistoryTaskId === item.gradingTaskId
+                        ? "border-primary bg-primary/10"
+                        : "bg-muted/20 hover:bg-muted/40"
+                    }`}
                   >
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <Badge variant="outline">r{item.revision}</Badge>
                       <Badge variant="secondary">{actionLabel}</Badge>
                       <Badge>{item.status}</Badge>
@@ -354,16 +421,16 @@ export function CellDetailSheet({
                             : ""}
                         </span>
                       ) : null}
+                      <span className="ml-auto text-[11px] text-muted-foreground/80">
+                        {new Date(item.updatedAt).toLocaleString()}
+                      </span>
                     </div>
                     {item.teacherInstruction ? (
-                      <p className="mt-1 line-clamp-2 text-muted-foreground">
+                      <p className="mt-0.5 line-clamp-1 text-muted-foreground">
                         追问：{item.teacherInstruction}
                       </p>
                     ) : null}
-                    <p className="mt-1 text-muted-foreground/80">
-                      {new Date(item.updatedAt).toLocaleString()}
-                    </p>
-                  </div>
+                  </button>
                 );
               })}
             </div>

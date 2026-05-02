@@ -2,8 +2,12 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -19,7 +23,9 @@ import type { ResultsDetailData } from "@/lib/results-data";
 type Tab = "students" | "questions";
 
 export function ResultsBoard({ data }: { data: ResultsDetailData }) {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>("students");
+  const [clearing, setClearing] = useState(false);
   // 学生榜默认按平均分降序，缺考排底；点表头再切换排序方向。
   const [studentSort, setStudentSort] = useState<"score_desc" | "score_asc" | "id">(
     "score_desc",
@@ -48,9 +54,54 @@ export function ResultsBoard({ data }: { data: ResultsDetailData }) {
     () => data.questions.filter((q) => !q.requireGrading),
     [data.questions],
   );
+  const totalNeedsReview = useMemo(
+    () => data.students.reduce((sum, s) => sum + s.needsReview, 0),
+    [data.students],
+  );
+
+  async function clearReviewFlags() {
+    if (clearing || totalNeedsReview === 0) return;
+    if (!window.confirm(`将清除本作业全部 ${totalNeedsReview} 条待复核标记，确认继续？`)) {
+      return;
+    }
+    setClearing(true);
+    try {
+      const r = await fetch("/api/results/clear-review-flags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchId: data.batchId }),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error(e.error ?? `HTTP ${r.status}`);
+      }
+      const payload = (await r.json()) as { cleared: number };
+      toast.success(`已清除 ${payload.cleared} 条待复核标记`);
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "清除失败");
+    } finally {
+      setClearing(false);
+    }
+  }
 
   return (
     <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-card p-2">
+        <div className="text-xs text-muted-foreground">
+          当前作业待复核：<span className="font-semibold text-foreground">{totalNeedsReview}</span>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={clearReviewFlags}
+          disabled={clearing || totalNeedsReview === 0}
+        >
+          {clearing ? <Loader2 className="size-4 animate-spin" /> : null}
+          批量清除待复核
+        </Button>
+      </div>
+
       {/* Tabs（手写，因为还没装 shadcn/tabs；按钮组够直观） */}
       <div className="inline-flex rounded-md border bg-card p-1">
         <TabBtn active={tab === "students"} onClick={() => setTab("students")}>
