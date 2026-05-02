@@ -512,17 +512,26 @@ service `web` 与 `backend` 并列。
     配 `{ delay: 200, tolerance: 5 }`（长按 200ms 才触发，避免跟"上下
     滑动滚页面"冲突）；外加 `KeyboardSensor` + `sortableKeyboardCoordinates`
     给 a11y 兜底。
-  - **拖动元素必须 `touch-action: none` + `<img draggable={false}>`**：
-    iOS Safari 不加 touch-action 会让原生惯性滚动跟拖动手势打架；img 不
-    设 draggable=false 浏览器会画一个"幽灵图"盖在 dnd-kit overlay 上，
-    看起来两层东西在动。
+  - **`touch-action: none` 只能挂"专用 drag handle"，不能挂整张拖动卡片**：
+    `touch-action: none` 会**关闭原生页面 scroll**——挂在整张缩略图上会让
+    "从缩略图开始的纵向 swipe 滚页面"这个最常用的手势失效。正确做法是
+    单独画一个 24×24+ 的 drag handle（小拖把手 icon），listeners + 
+    `touch-action: none` 都只挂在 handle 上；卡片本体既不装 listeners
+    也不动 touch-action，老师 swipe 卡片本体仍能正常滚页。dnd-kit 官方
+    docs 明确推荐这套，参考 `question-uploader.tsx:SortableThumbnail`。
+  - **`<img draggable={false}>`** 防浏览器原生"幽灵拖动"盖住 dnd-kit
+    overlay 看起来两层东西在动。
   - **删除/操作按钮必须 `onPointerDown={(e) => e.stopPropagation()}`**：
-    否则按下按钮也会触发外层 sensor activation，老师"想点删除"变成"开始
-    拖动"。
-  - **服务端只允许"重排序"，不允许通过 reorder 接口增删**：参考
-    `web/app/api/upload/route.ts:PATCH` —— 校验新数组是旧数组的
-    permutation（multiset 严格匹配），不一致返 409 让 client 刷新。
-    避免 race / bug 同时丢图 + 改序。
+    防御性隔离（即使 listeners 已经挂在专用 handle 上，万一将来 refactor
+    把 listeners 加回 wrapper 也不至于让"想点删除"变成"开始拖动"）。
+  - **服务端必须做"乐观锁 + multiset 校验"**：参考
+    `web/app/api/upload/route.ts:PATCH` —— payload 带 `previousImagePaths`
+    （client 拿到的旧序），server 校验 prev 必须按顺序等于 db 当前序，否则
+    409；新数组必须是 prev 的 permutation（不允许 reorder 偷偷增删）。
+    避免两个并发 PATCH 旧请求后到覆盖新写。
+  - **client 必须用 busy 锁串行所有写操作**：拖动 / 删除 / 上传任一进行中
+    都禁用其他写按钮 + `useSortable({ disabled: busy })`，避免乐观更新
+    交叉返回时旧响应覆盖新状态。
 
 ### 11.5 `web/` 烟测
 

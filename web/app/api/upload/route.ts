@@ -133,9 +133,14 @@ export async function POST(req: Request) {
   });
 }
 
-// 调整页序：传 { submissionId, imagePaths } —— imagePaths 必须是旧集合的
-// 一个 permutation（不允许通过 PATCH 增删，只能改顺序）。这层校验避免 client
-// 因 race / bug 同时丢图 + 改序。增删走 POST / DELETE。
+// 调整页序：传 { submissionId, previousImagePaths, imagePaths }。
+//
+// `previousImagePaths` 必须**按顺序**等于 db 当前 imagePaths（CAS 风格的乐观
+// 锁），用来防御并发：两次 PATCH 同时飞，旧 PATCH 用旧的 prev，db 已被新 PATCH
+// 改写 → prev 不匹配 → 409，client 看到后会 refetch 不会丢老师的最新拖动。
+//
+// `imagePaths`（新顺序）必须是 prev 的一个 permutation —— 只允许改顺序，不允许
+// 通过 PATCH 增删。增删走 POST / DELETE。
 export async function PATCH(req: Request) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -143,15 +148,13 @@ export async function PATCH(req: Request) {
   }
   const body = (await req.json().catch(() => ({}))) as {
     submissionId?: unknown;
+    previousImagePaths?: unknown;
     imagePaths?: unknown;
   };
   const submissionId = String(body?.submissionId ?? "");
-  const rawPaths = Array.isArray(body?.imagePaths) ? body.imagePaths : null;
-  const newPaths: string[] | null =
-    rawPaths && rawPaths.every((p): p is string => typeof p === "string")
-      ? (rawPaths as string[])
-      : null;
-  if (!submissionId || !newPaths) {
+  const newPaths = parseStringArray(body?.imagePaths);
+  const prevFromClient = parseStringArray(body?.previousImagePaths);
+  if (!submissionId || !newPaths || !prevFromClient) {
     return NextResponse.json({ error: "缺少字段" }, { status: 400 });
   }
 
@@ -165,25 +168,24 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "无权操作" }, { status: 404 });
   }
 
-  const old: string[] = safeParseStringArray(submission.imagePaths);
-  // 集合相等校验（数量 + 元素一致），multiset 严格匹配
-  if (newPaths.length !== old.length) {
+  const dbPaths: string[] = safeParseStringArray(submission.imagePaths);
+
+  // 1) 乐观锁：client 拿到的旧序必须按顺序匹配 db 当前序，否则有人抢先写了
+  if (!arrayEquals(prevFromClient, dbPaths)) {
+    return NextResponse.json(
+      { error: "图序已被更新，请刷新重试", imagePaths: dbPaths },
+      { status: 409 },
+    );
+  }
+
+  // 2) multiset 校验：new 必须是 db 的 permutation（防 reorder 偷偷增删）
+  if (!isPermutation(newPaths, dbPaths)) {
     return NextResponse.json({ error: "图集变化，请刷新重试" }, { status: 409 });
   }
-  const sorted = (xs: string[]) => [...xs].sort();
-  const a = sorted(old);
-  const b = sorted(newPaths);
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) {
-      return NextResponse.json(
-        { error: "图集变化，请刷新重试" },
-        { status: 409 },
-      );
-    }
-  }
-  // 顺序没变就不写库（省一次 sqlite write）
-  if (old.every((p, i) => p === newPaths[i])) {
-    return NextResponse.json({ imagePaths: old });
+
+  // 3) 顺序没变就不写库（省一次 sqlite write）
+  if (arrayEquals(newPaths, dbPaths)) {
+    return NextResponse.json({ imagePaths: dbPaths });
   }
 
   await prisma.submission.update({
@@ -191,6 +193,28 @@ export async function PATCH(req: Request) {
     data: { imagePaths: JSON.stringify(newPaths) },
   });
   return NextResponse.json({ imagePaths: newPaths });
+}
+
+function parseStringArray(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null;
+  if (!v.every((x): x is string => typeof x === "string")) return null;
+  return v as string[];
+}
+
+function arrayEquals(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function isPermutation(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sortedA = [...a].sort();
+  const sortedB = [...b].sort();
+  for (let i = 0; i < sortedA.length; i++) {
+    if (sortedA[i] !== sortedB[i]) return false;
+  }
+  return true;
 }
 
 // 删除单张图：传 path 字符串，从 Submission.imagePaths 里去掉，并删盘上的文件。
