@@ -35,6 +35,10 @@ export type ParsedGradingResult = {
    * 字段（如果有）不一定一致；以 result 内为准。
    */
   transcription: string;
+  /**
+   * 可选：模型生成的修改后范文。
+   */
+  modelAnswer: string | null;
 };
 
 export const EMPTY_PARSED_RESULT: ParsedGradingResult = {
@@ -46,6 +50,7 @@ export const EMPTY_PARSED_RESULT: ParsedGradingResult = {
   notes: null,
   dimensionScores: [],
   transcription: "",
+  modelAnswer: null,
 };
 
 export function parseGradingResult(raw: string | null): ParsedGradingResult {
@@ -78,6 +83,7 @@ export function parseGradingResult(raw: string | null): ParsedGradingResult {
           }))
         : [],
       transcription: typeof r.transcription === "string" ? r.transcription : "",
+      modelAnswer: typeof r.model_answer === "string" ? r.model_answer : null,
     };
   } catch {
     return { ...EMPTY_PARSED_RESULT };

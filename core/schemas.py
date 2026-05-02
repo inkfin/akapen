@@ -95,6 +95,10 @@ class GradingResult(BaseModel):
         default=None,
         description="模型对评分过程的补充说明（如 'OCR 草稿做了大量校对'），可空",
     )
+    model_answer: str | None = Field(
+        default=None,
+        description="可选：按老师要求生成的修改后范文（不需要时可空）",
+    )
 
 
 class SingleShotResult(BaseModel):
