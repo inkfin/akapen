@@ -17,6 +17,7 @@ import {
   testAkapenConnectionAction,
 } from "@/lib/actions/settings";
 import {
+  DEFAULT_PERSONA,
   DEFAULT_FEEDBACK_GUIDE,
   DEFAULT_PROMPT_GRADING,
   DEFAULT_PROMPT_OCR,
@@ -196,6 +197,36 @@ export function SettingsForm({ initial }: { initial: WebSettingsView }) {
         想覆盖单道题，去那道题的"修改意见"栏；想改"我所有题目都按这个语气批"，
         就改这里 —— 比如全班都是英语作文 / 全班都是数学，希望模型分别走不同的反馈风格。
       */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            默认人设（老师级）
+            <span className="text-xs font-normal text-muted-foreground">
+              {" "}· 全部作业共用
+            </span>
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            定义模型的基础角色和语气（例如：严谨、鼓励、偏步骤讲解）。仅在模板包含
+            <code className="mx-1 rounded bg-muted px-1 font-mono text-[11px]">
+              {"{persona}"}
+            </code>
+            时生效。
+          </p>
+        </CardHeader>
+        <CardContent>
+          <PromptField
+            label="默认人设"
+            value={s.defaultPersona}
+            onChange={(v) => update("defaultPersona", v)}
+            rows={3}
+            onReset={() => {
+              update("defaultPersona", DEFAULT_PERSONA);
+              toast.success("已重置为推荐人设");
+            }}
+          />
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">

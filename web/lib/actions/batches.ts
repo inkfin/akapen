@@ -18,6 +18,8 @@ const batchCreate = z.object({
   classId: z.string().min(1),
   title: z.string().min(1).max(128),
   notes: optionalText(2000),
+  subject: optionalText(64),
+  batchObjective: optionalText(2000),
 });
 
 export async function createBatchAction(
@@ -29,6 +31,8 @@ export async function createBatchAction(
     classId: formData.get("classId"),
     title: formData.get("title"),
     notes: formData.get("notes"),
+    subject: formData.get("subject"),
+    batchObjective: formData.get("batchObjective"),
   });
   if (!parsed.success) return { error: "请选择班级并填写标题" };
 
@@ -38,10 +42,49 @@ export async function createBatchAction(
       ownerId: userId,
       title: parsed.data.title.trim(),
       notes: parsed.data.notes.trim() || null,
+      subject: parsed.data.subject.trim() || null,
+      batchObjective: parsed.data.batchObjective.trim() || null,
     },
   });
   revalidatePath("/batches");
   return { id: batch.id };
+}
+
+const batchUpdate = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1).max(128),
+  notes: optionalText(2000),
+  subject: optionalText(64),
+  batchObjective: optionalText(2000),
+});
+
+export async function updateBatchAction(
+  _prev: { ok?: true; error?: string } | undefined,
+  formData: FormData,
+): Promise<{ ok?: true; error?: string } | undefined> {
+  const userId = await requireUserId();
+  const parsed = batchUpdate.safeParse({
+    id: formData.get("id"),
+    title: formData.get("title"),
+    notes: formData.get("notes"),
+    subject: formData.get("subject"),
+    batchObjective: formData.get("batchObjective"),
+  });
+  if (!parsed.success) return { error: "作业设置无效" };
+
+  const updated = await prisma.homeworkBatch.updateMany({
+    where: { id: parsed.data.id, ownerId: userId },
+    data: {
+      title: parsed.data.title.trim(),
+      notes: parsed.data.notes.trim() || null,
+      subject: parsed.data.subject.trim() || null,
+      batchObjective: parsed.data.batchObjective.trim() || null,
+    },
+  });
+  if (updated.count === 0) return { error: "作业不存在或无权修改" };
+  revalidatePath(`/batches/${parsed.data.id}`);
+  revalidatePath("/batches");
+  return { ok: true };
 }
 
 export async function deleteBatchAction(formData: FormData) {
@@ -82,6 +125,14 @@ const questionCreate = z
     requireGrading: requireGradingSchema,
     rubric: optionalText(4000),
     feedbackGuide: optionalText(4000),
+    thinkingOverride: optionalText(32),
+    provideModelAnswer: z.preprocess((v) => {
+      if (typeof v === "boolean") return v;
+      if (v === undefined || v === null) return false;
+      const s = String(v).toLowerCase();
+      return s === "on" || s === "true" || s === "1" || s === "yes";
+    }, z.boolean()),
+    modelAnswerGuide: optionalText(4000),
     customGradingPrompt: optionalText(16000),
     customSingleShotPrompt: optionalText(16000),
   })
@@ -91,6 +142,17 @@ const questionCreate = z
         code: z.ZodIssueCode.custom,
         path: ["rubric"],
         message: "需要打分时，给分细则不能为空",
+      });
+    }
+    if (
+      val.thinkingOverride.trim() !== "" &&
+      val.thinkingOverride !== "force_on" &&
+      val.thinkingOverride !== "force_off"
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["thinkingOverride"],
+        message: "思考模式覆盖只能是 force_on / force_off 或留空",
       });
     }
   });
@@ -107,6 +169,9 @@ export async function upsertQuestionAction(
     requireGrading: formData.get("requireGrading"),
     rubric: formData.get("rubric"),
     feedbackGuide: formData.get("feedbackGuide"),
+    thinkingOverride: formData.get("thinkingOverride"),
+    provideModelAnswer: formData.get("provideModelAnswer"),
+    modelAnswerGuide: formData.get("modelAnswerGuide"),
     customGradingPrompt: formData.get("customGradingPrompt"),
     customSingleShotPrompt: formData.get("customSingleShotPrompt"),
   });
@@ -119,6 +184,9 @@ export async function upsertQuestionAction(
     requireGrading: parsed.data.requireGrading,
     rubric: parsed.data.rubric.trim() || null,
     feedbackGuide: parsed.data.feedbackGuide.trim() || null,
+    thinkingOverride: parsed.data.thinkingOverride.trim() || null,
+    provideModelAnswer: parsed.data.provideModelAnswer,
+    modelAnswerGuide: parsed.data.modelAnswerGuide.trim() || null,
     customGradingPrompt: parsed.data.customGradingPrompt.trim() || null,
     customSingleShotPrompt: parsed.data.customSingleShotPrompt.trim() || null,
   };
