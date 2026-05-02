@@ -24,6 +24,7 @@
 - 满分 (`max_score`) 和评分维度完全按 rubric 来；不打分模式则省略 `final_score` / `max_score` / `dimension_scores`。
 - `final_score` 必须等于各 `dimension_scores[].score` 之和（rubric 拆维度时）。
 - 无法判断、证据不足时，把 `confidence` 压低、`review_flag` 设 true，让老师人工复核。
+- 除非老师在追问里明确要求“给出 prompt 优化建议”，否则不要输出 `prompt_suggestion` 字段。
 
 # 输出格式（**必须**严格 JSON）
 
@@ -45,6 +46,11 @@
     "review_reasons": ["<low_confidence / boundary_score / poor_handwriting / missing_evidence 等>"],
     "transcription": "<重复顶层 transcription 的值，让 grading 块自包含>",
     "model_answer": "<可选：按老师要求给出的修改后范文，不需要时可省略或留空>",
+    "prompt_suggestion": {
+      "reason": "<可选：为什么建议改 prompt>",
+      "suggested_rubric": "<可选：建议替换后的题目给分细则>",
+      "suggested_feedback_guide": "<可选：建议替换后的修改意见方向>"
+    },
     "notes": "<评分过程补充说明，可 null>"
   }
 }
