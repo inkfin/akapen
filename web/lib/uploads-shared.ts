@@ -17,22 +17,28 @@ export type ImageType = "jpeg" | "png" | "webp" | "heic";
 
 /**
  * HEIC/HEIF 容器（ISO BMFF）的 magic：第 4~12 字节是 "ftyp" + brand。
- * iPhone 拍出来的 brand 一般是这几个：
- *   - heic   : 单图 HEIC
- *   - heix   : 单图 HEIC（10-bit）
- *   - mif1   : iPhone 11+ 默认（mif1 = MIAF v1，HEIF 子集）
- *   - msf1   : 序列 / live photo 主帧
- *   - heim/heis/hevc : 视频帧抽出来的图（少见）
- * 我们一律收，让 backend 的 pillow-heif 决定能不能解。
+ * 这里覆盖 ISO/IEC 23008-12 注册的全部 still-image brand：
+ *   - heic / heix      : 单图 HEIC（8-bit / 10-bit）
+ *   - heif / hevx      : 通用 HEIF still / HEVC variant
+ *   - mif1             : iPhone 11+ 默认（mif1 = MIAF v1，HEIF 通用子集）
+ *   - msf1             : image sequence（live photo 主帧、burst）
+ *   - heim / heis / hevc : 视频帧抽出来的图（少见，但 iPhone 4K 录像截帧会出）
+ * UPLOAD_ACCEPT 里同时声明了 image/heic 和 image/heif，必须两边对齐——
+ * 否则 picker 让选 `ftypheif` 文件，server 415 拒，体验不一致。
+ *
+ * 真正能不能解还是由 backend `core/imageproc` 注册的 `pillow-heif` 决定，
+ * 这里只做"看起来像 HEIC 容器"的浅层放行。
  */
 const HEIC_BRANDS = new Set([
   "heic",
   "heix",
+  "heif",
+  "hevc",
+  "hevx",
   "mif1",
   "msf1",
   "heim",
   "heis",
-  "hevc",
 ]);
 
 export function detectImageType(bytes: Uint8Array): ImageType | null {

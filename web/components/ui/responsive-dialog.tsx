@@ -158,6 +158,9 @@ export const ResponsiveDialogContent = React.forwardRef<
           drawerHeight ?? "max-h-[90vh]",
           className,
         )}
+        // 透传剩余 props（id / data-* / aria-* / inline style / event handlers）
+        // 让两个分支真正"drop-in 互换"，避免迁移时桌面正常移动端静默失效。
+        {...props}
       >
         {/* 顶部把手：让用户看出来「这是个可下拉关闭的面板」 */}
         <div className="mx-auto mt-3 h-1.5 w-12 shrink-0 rounded-full bg-muted" />

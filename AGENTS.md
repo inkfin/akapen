@@ -478,10 +478,24 @@ service `web` 与 `backend` 并列。
 - ❌ **不要把 `File` 原样塞进 `FormData` 上传**：必须先过 `web/lib/image-compress.ts`
   的 `compressImage()` / `compressImages()`。原因：iPhone 直拍 3~5 MB JPEG，
   老师 4G 上行要 30~60s 才能上传一张；前端 canvas 缩到 1280px 长边 + JPEG 70%
-  后只剩 ~300 KB，3~5s 完成，体验差距巨大。helper 内部对 < 200 KB / HEIC /
-  压缩失败都会自动 fallback 到原 file，调用方无需关心错误处理。HEIC 格式
-  backend 已支持（`core/imageproc` 注册了 `pillow-heif`），不需要前端转格式，
-  只需要 `<input accept>` 用 `web/lib/uploads.ts:UPLOAD_ACCEPT` 常量保证一致。
+  后只剩 ~300 KB，3~5s 完成，体验差距巨大。
+  - **格式按输入保留**（默认 `mimeType: "auto"`）：JPEG → JPEG、PNG → PNG、
+    WebP → WebP，PNG 截图的透明度 / 锐度不被有损 JPEG 重编码毁掉；只有
+    HEIC/HEIF 因为浏览器 `canvas.toBlob` 不能输出 `image/heic` 才被强制转
+    成 JPEG。
+  - **HEIC 严格转码**：HEIC/HEIF 输入必须 client 端能解，否则 helper 抛
+    `HeicUnsupportedError`。调用方**必须 catch** 这个错误并给老师清晰提示
+    （"请用 iPhone Safari 17+ 上传" / 或在 iPhone 设置里改"兼容性最高"）；
+    **不要**把 `.heic` 原文件塞 backend，因为 `<img src=".../path.heic">`
+    在 Android Chrome / 桌面 Chrome 上 decode 不了 → 缩略图全是 broken
+    icon，老师传完根本不知道传错了什么。backend 装 `pillow-heif` 是为了
+    防御性转码（万一漏网），不代表前端可以放飞。
+  - **非 HEIC 失败永远 fallback 原 file**：旧手机 / OOM / canvas 被安全策略
+    拒绝任意一种异常都会自动回退到原 `File`，调用方无需 try/catch。
+  - **`<input accept>` 必须用 `web/lib/uploads-shared.ts:UPLOAD_ACCEPT`**：
+    集中常量保证 client picker / server 415 校验在同一份"接收格式表"里
+    （client 不能 import `web/lib/uploads.ts`，那个有 `node:path` 会进 client
+    bundle 报错）。
 - ❌ **不要给新对话框直接用 shadcn `Dialog`**：移动端键盘弹起会顶飞 Dialog、
   两边白边浪费屏幕。改用 `web/components/ui/responsive-dialog.tsx` 的
   `ResponsiveDialog` 系列（API 与 shadcn `Dialog` 一致，桌面照样走 Dialog、

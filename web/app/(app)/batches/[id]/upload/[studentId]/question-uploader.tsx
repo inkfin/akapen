@@ -1,11 +1,11 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { Camera, Loader2, Trash2 } from "lucide-react";
+import { Camera, ImageOff, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { compressImages } from "@/lib/image-compress";
+import { compressImages, HeicUnsupportedError } from "@/lib/image-compress";
 import { UPLOAD_ACCEPT } from "@/lib/uploads-shared";
 
 type Props = {
@@ -35,9 +35,11 @@ export function QuestionUploader({
     setUploading(true);
 
     try {
-      // 上传前做客户端压缩。compressImage 内部对 < 200KB / HEIC / 失败都
-      // 自动 fallback 原 file，不阻塞流程。手机直拍 3~5 MB → ~300 KB，4G
-      // 上传从 30~60s 缩到 3~5s（详见 web/lib/image-compress.ts）。
+      // 上传前做客户端压缩。compressImage 内部对 < 200KB / 非 HEIC 失败都
+      // 自动 fallback 原 file，不阻塞流程。但 HEIC/HEIF 输入必须能被浏览器
+      // 解码（否则 .heic 落盘后 <img> 标签预览破图），解不了会抛
+      // HeicUnsupportedError，这里 catch 后给老师明确引导。
+      // 手机直拍 3~5 MB JPEG → ~300 KB，4G 上传从 30~60s 缩到 3~5s。
       const original = Array.from(files);
       const compressed = await compressImages(original);
 
@@ -69,7 +71,12 @@ export function QuestionUploader({
       setPaths(j.imagePaths);
       toast.success(`已上传 ${files.length} 张`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "上传失败");
+      if (err instanceof HeicUnsupportedError) {
+        // HEIC 解不了：给一个比通用错误更长、更具操作性的提示
+        toast.error(err.message, { duration: 8000 });
+      } else {
+        toast.error(err instanceof Error ? err.message : "上传失败");
+      }
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -103,36 +110,12 @@ export function QuestionUploader({
       {paths.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {paths.map((p) => (
-            <div
+            <Thumbnail
               key={p}
-              className="relative size-20 overflow-hidden rounded-md border bg-muted"
-            >
-              {/* 缩略图直接走我们 own /api/uploads-preview 内部路由（图片是私有的，要走 next 鉴权）。
-                  这里在 client 里只能 fetch 然后 createObjectURL；但更简单的：用一个内部
-                  鉴权的图片路径。我们暂时直接用 /uploads-preview 路由（实现简单）。
-                  注意：/u/[token] 是给外部 akapen 用的签名 URL，不能在浏览器侧滥用。 */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={`/api/uploads-preview?p=${encodeURIComponent(p)}`}
-                alt={p}
-                className="size-full object-cover"
-              />
-              {/*
-                删除按钮 —— 始终可见。**不要用 group-hover** 隐藏：触屏设备没有
-                hover 状态，老师在手机上根本点不到。size-6 = 24px touch target
-                在 size-20 缩略图右上角刚好够大；半透明黑底 + 红 X 在彩色照片上
-                也辨识度足够。
-              */}
-              <button
-                type="button"
-                onClick={() => handleDelete(p)}
-                disabled={pending}
-                className="absolute right-1 top-1 flex size-6 items-center justify-center rounded bg-black/60 text-white transition-opacity hover:bg-destructive disabled:opacity-50"
-                aria-label="删除"
-              >
-                <Trash2 className="size-3.5" />
-              </button>
-            </div>
+              path={p}
+              disabled={pending}
+              onDelete={() => handleDelete(p)}
+            />
           ))}
         </div>
       ) : (
@@ -140,7 +123,8 @@ export function QuestionUploader({
       )}
 
       {/* 拍照 / 多选。accept 包含 image/heic + image/heif —— iPhone 老师从相册
-          选已存的 HEIC 不会被浏览器灰掉；后端走 pillow-heif 透明解码。 */}
+          选已存的 HEIC 不会被浏览器灰掉；client 端会先转 JPEG 再上传，落盘
+          的永远是浏览器能 decode 的格式（避免 .heic 文件 <img> 标签破图）。 */}
       <input
         ref={inputRef}
         type="file"
@@ -163,6 +147,60 @@ export function QuestionUploader({
         )}
         {uploading ? "上传中..." : "拍照 / 选图上传"}
       </Button>
+    </div>
+  );
+}
+
+/**
+ * 缩略图小卡片。`onError` 兜底是为了万一有历史 `.heic` 文件遗留在库里
+ * （或浏览器拉图临时 fail），不至于让老师看到一堆破图 icon —— 显示一个
+ * 占位 + 文件名末段，照样能识别和删除。
+ */
+function Thumbnail({
+  path,
+  disabled,
+  onDelete,
+}: {
+  path: string;
+  disabled: boolean;
+  onDelete: () => void;
+}) {
+  const [broken, setBroken] = useState(false);
+  return (
+    <div className="relative size-20 overflow-hidden rounded-md border bg-muted">
+      {broken ? (
+        <div className="flex size-full flex-col items-center justify-center gap-1 px-1 text-muted-foreground">
+          <ImageOff className="size-5" />
+          <span className="line-clamp-1 max-w-full text-[10px] leading-tight">
+            {path.split("/").pop()}
+          </span>
+        </div>
+      ) : (
+        // /api/uploads-preview 是私有路径（next session 鉴权），不要替换成
+        // /u/[token]——后者是给 akapen 容器拉图的签名 URL，不该泄漏到浏览器。
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={`/api/uploads-preview?p=${encodeURIComponent(path)}`}
+          alt={path}
+          className="size-full object-cover"
+          onError={() => setBroken(true)}
+        />
+      )}
+      {/*
+        删除按钮 —— 始终可见。**不要用 group-hover** 隐藏：触屏设备没有
+        hover 状态，老师在手机上根本点不到。size-6 = 24px touch target
+        在 size-20 缩略图右上角刚好够大；半透明黑底 + 红 X 在彩色照片上
+        也辨识度足够。
+      */}
+      <button
+        type="button"
+        onClick={onDelete}
+        disabled={disabled}
+        className="absolute right-1 top-1 flex size-6 items-center justify-center rounded bg-black/60 text-white transition-opacity hover:bg-destructive disabled:opacity-50"
+        aria-label="删除"
+      >
+        <Trash2 className="size-3.5" />
+      </button>
     </div>
   );
 }
