@@ -64,10 +64,10 @@ export default async function BatchDetailPage({
             <p className="text-sm text-muted-foreground">
               {batch.class.name} · {batch.class._count.students} 名学生 · {batch.questions.length} 题
             </p>
-            {batch.subject || batch.batchObjective ? (
+            {batch.batchSubject || batch.batchObjective ? (
               <p className="mt-1 text-xs text-muted-foreground">
-                {batch.subject ? `学科：${batch.subject}` : ""}
-                {batch.subject && batch.batchObjective ? " · " : ""}
+                {batch.batchSubject ? `学科：${batch.batchSubject}` : ""}
+                {batch.batchSubject && batch.batchObjective ? " · " : ""}
                 {batch.batchObjective ? `目标：${batch.batchObjective}` : ""}
               </p>
             ) : null}
@@ -105,7 +105,7 @@ export default async function BatchDetailPage({
             id: batch.id,
             title: batch.title,
             notes: batch.notes,
-            subject: batch.subject,
+            batchSubject: batch.batchSubject,
             batchObjective: batch.batchObjective,
           }}
         />

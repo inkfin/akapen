@@ -81,8 +81,8 @@ export function CreateBatchDialog({
             <Textarea id="notes" name="notes" rows={3} placeholder="给批改者的整体说明" />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="subject">学科（可选）</Label>
-            <Input id="subject" name="subject" placeholder="语文 / 英语 / 数学" />
+            <Label htmlFor="batchSubject">学科（可选）</Label>
+            <Input id="batchSubject" name="batchSubject" placeholder="语文 / 英语 / 数学" />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="batchObjective">作业目标（可选）</Label>

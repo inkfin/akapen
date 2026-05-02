@@ -383,7 +383,7 @@ export async function loadResultsDetail(
   return {
     batchId: batch.id,
     batchTitle: batch.title,
-    batchSubject: batch.subject ?? null,
+    batchSubject: batch.batchSubject ?? null,
     batchObjective: batch.batchObjective ?? null,
     className: batch.class.name,
     hasInFlight,
@@ -570,7 +570,7 @@ export async function loadStudentReport(
   return {
     batchId: batch.id,
     batchTitle: batch.title,
-    batchSubject: batch.subject ?? null,
+    batchSubject: batch.batchSubject ?? null,
     batchObjective: batch.batchObjective ?? null,
     className: batch.class.name,
     student: {
