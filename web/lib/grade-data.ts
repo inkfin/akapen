@@ -21,6 +21,8 @@ export type CellState = {
     gradingTaskId: string;
     akapenTaskId: string | null;
     status: string;
+    mode: string;
+    actionType: string;
     revision: number;
     finalScore: number | null;
     // LLM 评分时实际用的满分（来自 result.max_score）。
@@ -106,6 +108,8 @@ export async function loadGradeBoard(
               gradingTaskId: latest.id,
               akapenTaskId: latest.akapenTaskId,
               status: latest.status,
+              mode: latest.mode,
+              actionType: latest.actionType,
               revision: latest.revision,
               finalScore: latest.finalScore,
               maxScore: latest.maxScore,

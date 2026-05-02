@@ -215,6 +215,8 @@ export type ResultsQuestionRow = {
 export type ResultsDetailData = {
   batchId: string;
   batchTitle: string;
+  batchSubject: string | null;
+  batchObjective: string | null;
   className: string;
   // 是否还有题在批改（pending/queued/running），UI 上提示用户去 /grade/[id] 处理
   hasInFlight: boolean;
@@ -381,6 +383,8 @@ export async function loadResultsDetail(
   return {
     batchId: batch.id,
     batchTitle: batch.title,
+    batchSubject: batch.subject ?? null,
+    batchObjective: batch.batchObjective ?? null,
     className: batch.class.name,
     hasInFlight,
     students: studentRows,
@@ -404,6 +408,8 @@ export type StudentReportQuestion = {
   imagePaths: string[];
   // grading 维度（latest revision；可能不存在 = 已交未批 / 未交）
   status: string | null;
+  mode: string | null;
+  actionType: string | null;
   revision: number | null;
   reviewFlag: boolean;
   errorCode: string | null;
@@ -415,6 +421,8 @@ export type StudentReportQuestion = {
 export type StudentReportData = {
   batchId: string;
   batchTitle: string;
+  batchSubject: string | null;
+  batchObjective: string | null;
   className: string;
   student: {
     id: string;
@@ -507,6 +515,8 @@ export async function loadStudentReport(
         hasSubmission: false,
         imagePaths: [],
         status: null,
+        mode: null,
+        actionType: null,
         revision: null,
         reviewFlag: false,
         errorCode: null,
@@ -540,6 +550,8 @@ export async function loadStudentReport(
       hasSubmission: true,
       imagePaths: safeArr(sub.imagePaths),
       status: latest?.status ?? null,
+      mode: latest?.mode ?? null,
+      actionType: latest?.actionType ?? null,
       revision: latest?.revision ?? null,
       reviewFlag: latest?.reviewFlag ?? false,
       errorCode: latest?.errorCode ?? null,
@@ -558,6 +570,8 @@ export async function loadStudentReport(
   return {
     batchId: batch.id,
     batchTitle: batch.title,
+    batchSubject: batch.subject ?? null,
+    batchObjective: batch.batchObjective ?? null,
     className: batch.class.name,
     student: {
       id: student.id,
