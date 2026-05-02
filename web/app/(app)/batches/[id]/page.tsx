@@ -92,13 +92,14 @@ export default async function BatchDetailPage({
         </div>
       </div>
 
-      <details className="rounded-md border p-3">
-        <summary className="cursor-pointer text-sm font-medium">
-          作业设置（页内编辑）
-        </summary>
-        <p className="mt-1 mb-3 text-xs text-muted-foreground">
-          这里配置作业级上下文（学科/目标/备注），不用额外弹窗或抽屉。
-        </p>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">作业设置（页内编辑）</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            这里配置作业级上下文（学科/目标/备注），不用额外弹窗或抽屉。
+          </p>
+        </CardHeader>
+        <CardContent>
         <BatchSettingsForm
           batch={{
             id: batch.id,
@@ -108,7 +109,8 @@ export default async function BatchDetailPage({
             batchObjective: batch.batchObjective,
           }}
         />
-      </details>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="flex-row items-center justify-between">
