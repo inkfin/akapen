@@ -20,5 +20,10 @@ declare module "next-auth/jwt" {
   interface JWT {
     userId?: string;
     role?: string;
+    /**
+     * 上次成功验证 `userId` 仍存在 DB（或刚签发）的时间戳（ms）。
+     * 给 lib/auth.ts 的 stale-userId 节流用。
+     */
+    lastVerifiedAt?: number;
   }
 }

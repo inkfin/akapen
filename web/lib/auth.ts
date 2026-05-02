@@ -3,7 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 
-import authConfig from "./auth.config";
+import authConfig, { applyUserToToken } from "./auth.config";
 import { prisma } from "./db";
 
 // 只支持邮箱 + 密码。学生不登录（产品决策 A），无 OAuth、无邀请码。
@@ -28,28 +28,38 @@ const credentialsSchema = z.object({
  */
 const STALE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
+/**
+ * stale-check 失败时的退避间隔（毫秒）。
+ *
+ * DB 临时不可用（连接池满 / 短暂 down / 部署窗口）会让 prisma.findUnique
+ * 抛错。如果 catch 里直接 return token 不更新计时器，节流条件 `now -
+ * lastVerifiedAt > INTERVAL` 始终成立 → 每次 auth() 都立刻再发一次 query
+ * → 故障期形成请求风暴，DB 雪上加霜。
+ *
+ * 这里把 lastVerifiedAt 推到 `now - INTERVAL + RETRY_BACKOFF`，让下次允许
+ * 检查的时间被推迟 30 秒。trade-off：故障恢复后最迟 30s 内就重新核对，
+ * 同时整个故障期把 stale-check 的 query 量限制在 1/30s/conn。
+ */
+const STALE_CHECK_RETRY_BACKOFF_MS = 30 * 1000;
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   callbacks: {
     // 复用 authConfig 的 authorized + session callback；只覆盖 jwt
     ...authConfig.callbacks,
     async jwt({ token, user }) {
-      // 首次签发：把 user.id / user.role 塞进 token（沿用原 auth.config 逻辑，
-      // 这里没法直接 await 调那边的 jwt callback，所以重写一份；改动时记得
-      // 跟 auth.config.ts 那边的 jwt callback 同步）
-      if (user) {
-        token.userId = user.id;
-        token.role = (user as { role?: string }).role ?? "teacher";
-        token.lastVerifiedAt = Date.now();
-      }
+      // 首次签发：用 auth.config.ts 共享的 helper（保持 edge / node 路径一致）。
+      // NextAuth v5 callbacks merge 是浅覆盖、没法 await base 版本，所以这里
+      // 必须手动调一次；helper 抽出来避免两处实现漂移。
+      applyUserToToken(token, user);
 
       // 防御 stale JWT：现网遇到过 web.db 备份恢复 / 重建后，老师浏览器
       // cookie 里 token.userId 在新 DB 里不存在；任何 create 操作触发 P2003
       // FK violation，老师只看到"创建失败"。这里每 5 分钟（节流，避免每次
       // auth() 都查 DB）核对一次 userId 仍在 DB 里，不在则 return null →
       // NextAuth v5 会清 session → 下次请求 middleware redirect 到 /login。
-      const lastVerified = (token.lastVerifiedAt as number | undefined) ?? 0;
-      const userId = token.userId as string | undefined;
+      const lastVerified = token.lastVerifiedAt ?? 0;
+      const userId = token.userId;
       if (userId && Date.now() - lastVerified > STALE_CHECK_INTERVAL_MS) {
         try {
           const exists = await prisma.user.findUnique({
@@ -58,9 +68,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           });
           if (!exists) return null;
           token.lastVerifiedAt = Date.now();
-        } catch {
-          // DB 临时不可用（连接池满 / 短暂 down）：放行，避免 false
-          // negative 把所有用户踢下线。下一次 auth() 还是会再次尝试。
+        } catch (err) {
+          // DB 临时不可用：放行避免 false negative 把所有用户踢下线，但
+          // 必须更新 lastVerifiedAt 让"30s 后才允许下次检查"，否则节流条件
+          // 每次 auth() 都满足 → 故障期请求风暴。
+          // 推到 `now - INTERVAL + RETRY_BACKOFF` 等价于"下次检查 30s 后到期"。
+          token.lastVerifiedAt =
+            Date.now() - STALE_CHECK_INTERVAL_MS + STALE_CHECK_RETRY_BACKOFF_MS;
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[auth.jwt] stale-userId check failed, will retry in",
+            STALE_CHECK_RETRY_BACKOFF_MS,
+            "ms:",
+            err instanceof Error ? err.message : String(err),
+          );
           return token;
         }
       }
