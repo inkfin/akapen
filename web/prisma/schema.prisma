@@ -65,7 +65,7 @@ model HomeworkBatch {
   title     String     // "9月第一次作文"
   notes     String?    // 给批改者的整体说明
   // 作业学科（语文 / 英语 / 数学 ...），用于拼作业级上下文。
-  subject   String?
+  batchSubject   String?
   // 作业目标（本次想考查什么能力），给 prompt 注入背景但不直接参与打分。
   batchObjective String?
   dueDate   DateTime?

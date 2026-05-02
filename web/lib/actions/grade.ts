@@ -37,7 +37,7 @@ import { substituteRubric } from "@/lib/model-catalog";
 function buildProviderOverridesForQuestion(
   s: WebSettingsView,
   batch: {
-    subject: string | null;
+    batchSubject: string | null;
     batchObjective: string | null;
   },
   question: {
@@ -61,7 +61,7 @@ function buildProviderOverridesForQuestion(
 
   const subOpts = {
     persona: s.defaultPersona,
-    batchSubject: batch.subject,
+    batchSubject: batch.batchSubject,
     batchObjective: batch.batchObjective,
     requireGrading: question.requireGrading,
     rubric: question.rubric,
