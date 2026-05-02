@@ -52,6 +52,7 @@ export type GradeBoardData = {
      * UI 拿到这两种 case 应该呈现得完全不一样，不能一刀切。
      */
     requireGrading: boolean;
+    provideModelAnswer: boolean;
   }[];
   cells: Record<string, Record<string, CellState>>;
 };
@@ -137,6 +138,7 @@ export async function loadGradeBoard(
       index: q.index,
       prompt: q.prompt,
       requireGrading: q.requireGrading,
+      provideModelAnswer: q.provideModelAnswer,
     })),
     cells,
   };

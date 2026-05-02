@@ -143,13 +143,22 @@ function safeArr(s: string | null): string[] {
  */
 export async function gradeSubmissionsAction(
   submissionIds: string[],
-  options?: { questionContextOverride?: string },
+  options?: {
+    questionContextOverride?: string;
+    mode?: "grade" | "revise";
+    actionType?: "grade" | "followup" | "model_answer_regen";
+    teacherInstruction?: string;
+  },
 ): Promise<{ ok: number; failed: number; errors: string[] }> {
   const userId = await requireUserId();
   const result = { ok: 0, failed: 0, errors: [] as string[] };
 
   // 老师全局设置（model / prompts 模板 / 行为开关），所有题共用
   const settings = await getWebSettings();
+
+  const mode = options?.mode ?? "grade";
+  const actionType = options?.actionType ?? "grade";
+  const teacherInstruction = (options?.teacherInstruction ?? "").trim();
 
   // 一次性把 submission + 关联实体取出来，避免 N+1
   const submissions = await prisma.submission.findMany({
@@ -185,8 +194,9 @@ export async function gradeSubmissionsAction(
         submissionId: sub.id,
         idempotencyKey,
         revision,
-        mode: "grade",
-        actionType: "grade",
+        mode,
+        actionType,
+        teacherInstruction: teacherInstruction || null,
         status: "pending",
         attempts: 1,
       },
@@ -213,6 +223,9 @@ export async function gradeSubmissionsAction(
       }
       if (sub.question.feedbackGuide && sub.question.feedbackGuide.trim()) {
         ctxParts.push(`修改意见方向：\n${sub.question.feedbackGuide.trim()}`);
+      }
+      if (teacherInstruction) {
+        ctxParts.push(`老师追问/补充要求：\n${teacherInstruction}`);
       }
       const ctx = ctxParts.join("\n\n");
 
