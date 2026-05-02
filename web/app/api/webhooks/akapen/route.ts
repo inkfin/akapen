@@ -68,6 +68,20 @@ const payloadSchema = z.object({
   timestamp: z.string(),
 });
 
+function extractPromptSuggestion(
+  result: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!result || typeof result !== "object") return null;
+  const top = result.prompt_suggestion;
+  if (top && typeof top === "object") return JSON.stringify(top);
+  const grading = result.grading;
+  if (grading && typeof grading === "object") {
+    const nested = (grading as Record<string, unknown>).prompt_suggestion;
+    if (nested && typeof nested === "object") return JSON.stringify(nested);
+  }
+  return null;
+}
+
 export async function POST(req: Request) {
   // 一定要拿原始 body 字符串，不能用 .json()——签名是对原始 bytes 算的
   const rawBody = await req.text();
@@ -118,6 +132,9 @@ export async function POST(req: Request) {
       data: {
         status: localStatus,
         result: payload.result ? JSON.stringify(payload.result) : null,
+        promptSuggestion: payload.result
+          ? extractPromptSuggestion(payload.result)
+          : null,
         finalScore:
           payload.result && typeof payload.result.final_score === "number"
             ? payload.result.final_score

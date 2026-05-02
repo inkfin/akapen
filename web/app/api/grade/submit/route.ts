@@ -19,6 +19,8 @@ export const dynamic = "force-dynamic";
 
 const bodySchema = z.object({
   submissionIds: z.array(z.string().min(1)).min(1).max(200),
+  actionType: z.enum(["grade", "followup", "model_answer_regen"]).optional(),
+  teacherInstruction: z.string().max(2000).optional(),
 });
 
 export async function POST(req: Request) {
@@ -31,6 +33,10 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
-  const result = await gradeSubmissionsAction(body.submissionIds);
+  const result = await gradeSubmissionsAction(body.submissionIds, {
+    mode: body.actionType === "grade" || !body.actionType ? "grade" : "revise",
+    actionType: body.actionType ?? "grade",
+    teacherInstruction: body.teacherInstruction,
+  });
   return NextResponse.json(result);
 }

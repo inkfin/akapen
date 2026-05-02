@@ -2,10 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Sheet,
   SheetContent,
@@ -26,6 +28,7 @@ type Props = {
     index: number;
     prompt: string;
     requireGrading: boolean;
+    provideModelAnswer: boolean;
   };
   cell: CellState;
   onClose: () => void;
@@ -49,6 +52,7 @@ type ResultPayload = {
     deductions: Array<{ rule: string; points: number; evidence: string | null }>;
   }>;
   transcription: string;
+  modelAnswer: string | null;
   errorCode: string | null;
   errorMessage: string | null;
 };
@@ -61,6 +65,7 @@ export function CellDetailSheet({
   onClose,
 }: Props) {
   const qc = useQueryClient();
+  const [followupText, setFollowupText] = useState("");
 
   // 详情抽屉打开 + 已 succeeded 时按需拉一次完整 result。
   // 没用 refetchInterval：result 拿到就不会变（重批走新 GradingTask），
@@ -84,12 +89,19 @@ export function CellDetailSheet({
   });
 
   const submitMut = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (payload?: {
+      actionType?: "grade" | "followup" | "model_answer_regen";
+      teacherInstruction?: string;
+    }) => {
       if (!cell.submissionId) throw new Error("没有上传图片");
       const r = await fetch("/api/grade/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ submissionIds: [cell.submissionId] }),
+        body: JSON.stringify({
+          submissionIds: [cell.submissionId],
+          actionType: payload?.actionType ?? "grade",
+          teacherInstruction: payload?.teacherInstruction ?? undefined,
+        }),
       });
       if (!r.ok) {
         const e = await r.json().catch(() => ({}));
@@ -97,9 +109,16 @@ export function CellDetailSheet({
       }
       return r.json();
     },
-    onSuccess: () => {
-      toast.success("已提交批改");
+    onSuccess: (_, vars) => {
+      if (vars?.actionType === "model_answer_regen") {
+        toast.success("已提交范文重生");
+      } else if (vars?.actionType === "followup") {
+        toast.success("已提交追问修订");
+      } else {
+        toast.success("已提交批改");
+      }
       qc.invalidateQueries({ queryKey: ["grade-board", batchId] });
+      setFollowupText("");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -197,7 +216,7 @@ export function CellDetailSheet({
         {/* 操作 */}
         <div className="flex gap-2">
           <Button
-            onClick={() => submitMut.mutate()}
+            onClick={() => submitMut.mutate({ actionType: "grade" })}
             disabled={submitMut.isPending || !cell.submissionId}
           >
             {submitMut.isPending ? (
@@ -207,6 +226,22 @@ export function CellDetailSheet({
             )}
             {cell.latest ? "重批（新一轮）" : "提交批改"}
           </Button>
+          {question.provideModelAnswer ? (
+            <Button
+              variant="outline"
+              onClick={() =>
+                submitMut.mutate({ actionType: "model_answer_regen" })
+              }
+              disabled={submitMut.isPending || !cell.submissionId}
+            >
+              {submitMut.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Sparkles className="size-4" />
+              )}
+              重生范文
+            </Button>
+          ) : null}
           {cell.latest?.akapenTaskId && cell.latest.status === "failed" ? (
             <Button
               variant="outline"
@@ -222,6 +257,38 @@ export function CellDetailSheet({
             </Button>
           ) : null}
         </div>
+
+        {cell.latest ? (
+          <details className="rounded-md border p-3">
+            <summary className="cursor-pointer text-sm font-medium">
+              追问修订（页内）
+            </summary>
+            <div className="mt-2 space-y-2">
+              <Textarea
+                rows={4}
+                value={followupText}
+                onChange={(e) => setFollowupText(e.target.value)}
+                placeholder="例如：这题扣分偏重，请结合原文再复核一次；若有依据可上调 2~3 分。"
+              />
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    submitMut.mutate({
+                      actionType: "followup",
+                      teacherInstruction: followupText.trim(),
+                    })
+                  }
+                  disabled={
+                    submitMut.isPending || followupText.trim().length === 0
+                  }
+                >
+                  {submitMut.isPending ? "提交中…" : "提交追问"}
+                </Button>
+              </div>
+            </div>
+          </details>
+        ) : null}
 
         {/* LLM 输出：feedback / 维度 / 转写 */}
         {cell.latest?.status === "succeeded" ? (
@@ -298,6 +365,14 @@ export function CellDetailSheet({
                   {result.transcription}
                 </pre>
               </details>
+            ) : null}
+            {result?.modelAnswer ? (
+              <section className="space-y-1">
+                <div className="text-sm font-medium">修改后范文</div>
+                <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/20 p-2 text-xs">
+                  {result.modelAnswer}
+                </pre>
+              </section>
             ) : null}
             {result?.notes ? (
               <p className="text-xs text-muted-foreground">
