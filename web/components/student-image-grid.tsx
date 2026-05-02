@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCcw, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -24,7 +24,10 @@ type Props = {
  *
  * 行为约定：
  * - 缩略图本身是 `<button>`，回车 / 空格 / 点击都能打开 lightbox
- * - lightbox：Esc 关闭、← / → 翻页（桌面），移动端水平 swipe 翻页
+ * - lightbox 翻页：← / → 键 / 角按钮（桌面），单指 swipe（移动）
+ * - lightbox 缩放：双击 toggle 1×↔2×、wheel（桌面），双指 pinch（移动）
+ *   缩放范围 [1×, 4×]；缩放后翻页按钮 / swipe 自动停用，避免与拖动冲突
+ * - 切换图片 / Esc 关闭：自动复位 (scale=1, 居中)
  * - 同一时间只可能一个 lightbox 实例（局部 state，不依赖全局）
  *
  * 不要做的事：
@@ -83,6 +86,74 @@ export function StudentImageGrid({ paths, className }: Props) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Lightbox + 自实现 zoom/pan                                          */
+/* ------------------------------------------------------------------ */
+/**
+ * 缩放规则：
+ * - scale ∈ [MIN_SCALE, MAX_SCALE]
+ * - 双击：scale = 1 时放到 ZOOM_STEP，否则归位
+ * - 桌面 wheel：以鼠标位置为锚缩放
+ * - 移动 pinch：以两指中点为锚缩放
+ * - scale > 1 时：单指 / 鼠标拖动平移；不再触发翻页 swipe
+ * - scale = 1 时：单指水平滑动 ≥SWIPE_THRESHOLD 触发翻页
+ * - 切换图片 / 关闭：自动 reset 回 (scale=1, tx=0, ty=0)
+ *
+ * 不依赖第三方 zoom 库（react-zoom-pan-pinch 体积比这一份逻辑还大）。
+ */
+const MIN_SCALE = 1;
+const MAX_SCALE = 4;
+const ZOOM_STEP = 2;
+const WHEEL_ZOOM_STEP = 1.15;
+const SWIPE_THRESHOLD = 50;
+
+type Transform = { scale: number; tx: number; ty: number };
+const IDENTITY: Transform = { scale: 1, tx: 0, ty: 0 };
+
+function clampScale(s: number): number {
+  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
+}
+
+/**
+ * 以容器中心为参考系，把 scale 从 oldScale → newScale，且让 (focalX, focalY)
+ * （相对 stage 中心的偏移）这一图上的点不动。
+ *
+ * transform-origin = center center，CSS transform 序列是 translate→scale，
+ * 对图本地一点 P（相对图中心）：屏幕位置（相对 stage 中心）= tx + P*s
+ * 解 tx_new = focalX - (focalX - tx_old) * (newScale / oldScale)
+ *
+ * 调用方负责把「鼠标 / 手指中心」转成「相对 stage 中心」的偏移。
+ */
+function zoomAround(
+  prev: Transform,
+  newScale: number,
+  focalX: number,
+  focalY: number,
+): Transform {
+  const s2 = clampScale(newScale);
+  if (s2 === prev.scale) return prev;
+  const ratio = s2 / prev.scale;
+  return {
+    scale: s2,
+    tx: focalX - (focalX - prev.tx) * ratio,
+    ty: focalY - (focalY - prev.ty) * ratio,
+  };
+}
+
+/** 把鼠标 / 手指位置转成「相对 stage 中心」的偏移。 */
+function focalRelCenter(
+  el: HTMLElement | null,
+  clientX: number,
+  clientY: number,
+): { x: number; y: number } {
+  if (!el) return { x: 0, y: 0 };
+  const r = el.getBoundingClientRect();
+  return {
+    x: clientX - r.left - r.width / 2,
+    y: clientY - r.top - r.height / 2,
+  };
+}
+
 function Lightbox({
   paths,
   index,
@@ -95,21 +166,31 @@ function Lightbox({
   onClose: () => void;
 }) {
   const total = paths.length;
+  const [t, setT] = useState<Transform>(IDENTITY);
+
+  const reset = useCallback(() => setT(IDENTITY), []);
 
   const goPrev = useCallback(() => {
-    if (index > 0) onIndex(index - 1);
-  }, [index, onIndex]);
+    if (index > 0) {
+      reset();
+      onIndex(index - 1);
+    }
+  }, [index, onIndex, reset]);
 
   const goNext = useCallback(() => {
-    if (index < total - 1) onIndex(index + 1);
-  }, [index, total, onIndex]);
+    if (index < total - 1) {
+      reset();
+      onIndex(index + 1);
+    }
+  }, [index, total, onIndex, reset]);
 
-  // 键盘 + 锁 body scroll（避免移动端拉到底层页面）
+  // 键盘 + 锁 body scroll
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
       else if (e.key === "ArrowLeft") goPrev();
       else if (e.key === "ArrowRight") goNext();
+      else if (e.key === "0") reset();
     }
     window.addEventListener("keydown", onKey);
 
@@ -120,30 +201,183 @@ function Lightbox({
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
     };
-  }, [goPrev, goNext, onClose]);
+  }, [goPrev, goNext, onClose, reset]);
 
-  // 简易水平 swipe 翻页：阈值 50px，竖向滑动 / 多指捏合不触发
-  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  /* ---------- wheel 缩放（桌面） ---------- */
+  // 用 ref + 非被动监听器，为了 preventDefault（react onWheel 默认是 passive，
+  // preventDefault 会被忽略，导致页面跟着滚 / lightbox 内 scale 跳动）。
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      const f = focalRelCenter(el, e.clientX, e.clientY);
+      setT((prev) => {
+        const factor = e.deltaY < 0 ? WHEEL_ZOOM_STEP : 1 / WHEEL_ZOOM_STEP;
+        return zoomAround(prev, prev.scale * factor, f.x, f.y);
+      });
+    }
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  /* ---------- 触摸：单指拖动（缩放后） / 双指 pinch / 单指 swipe（未缩放） ---------- */
+  type TouchSession =
+    | {
+        kind: "pan";
+        startX: number;
+        startY: number;
+        startTx: number;
+        startTy: number;
+      }
+    | {
+        kind: "pinch";
+        startDist: number;
+        startScale: number;
+        startTx: number;
+        startTy: number;
+        startMidX: number; // 容器内坐标（rect 相对）
+        startMidY: number;
+      }
+    | {
+        kind: "swipe";
+        startX: number;
+        startY: number;
+      };
+  const touchRef = useRef<TouchSession | null>(null);
+
+  function midRelCenter(e: React.TouchEvent): { x: number; y: number } {
+    const t1 = e.touches[0];
+    const t2 = e.touches[1];
+    return focalRelCenter(
+      stageRef.current,
+      (t1.clientX + t2.clientX) / 2,
+      (t1.clientY + t2.clientY) / 2,
+    );
+  }
+
   function onTouchStart(e: React.TouchEvent) {
-    if (e.touches.length !== 1) {
-      touchStartRef.current = null;
+    if (e.touches.length === 2) {
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const mid = midRelCenter(e);
+      touchRef.current = {
+        kind: "pinch",
+        startDist: dist || 1,
+        startScale: t.scale,
+        startTx: t.tx,
+        startTy: t.ty,
+        startMidX: mid.x,
+        startMidY: mid.y,
+      };
       return;
     }
-    touchStartRef.current = {
-      x: e.touches[0].clientX,
-      y: e.touches[0].clientY,
-    };
+    if (e.touches.length === 1) {
+      if (t.scale > 1) {
+        touchRef.current = {
+          kind: "pan",
+          startX: e.touches[0].clientX,
+          startY: e.touches[0].clientY,
+          startTx: t.tx,
+          startTy: t.ty,
+        };
+      } else {
+        touchRef.current = {
+          kind: "swipe",
+          startX: e.touches[0].clientX,
+          startY: e.touches[0].clientY,
+        };
+      }
+    }
   }
+
+  function onTouchMove(e: React.TouchEvent) {
+    const s = touchRef.current;
+    if (!s) return;
+    if (s.kind === "pinch" && e.touches.length === 2) {
+      e.preventDefault();
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const ratio = (dist || 1) / s.startDist;
+      const newScale = clampScale(s.startScale * ratio);
+      // 用 startMidX/Y 作为锚（手指位置实时变也 OK，但 startMid 更稳）
+      const r = newScale / s.startScale;
+      setT({
+        scale: newScale,
+        tx: s.startMidX - (s.startMidX - s.startTx) * r,
+        ty: s.startMidY - (s.startMidY - s.startTy) * r,
+      });
+    } else if (s.kind === "pan" && e.touches.length === 1) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - s.startX;
+      const dy = e.touches[0].clientY - s.startY;
+      setT((prev) => ({ scale: prev.scale, tx: s.startTx + dx, ty: s.startTy + dy }));
+    }
+  }
+
   function onTouchEnd(e: React.TouchEvent) {
-    const start = touchStartRef.current;
-    touchStartRef.current = null;
-    if (!start || e.changedTouches.length !== 1) return;
-    const dx = e.changedTouches[0].clientX - start.x;
-    const dy = e.changedTouches[0].clientY - start.y;
-    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
+    const s = touchRef.current;
+    touchRef.current = null;
+    if (!s || s.kind !== "swipe") return;
+    if (e.changedTouches.length !== 1) return;
+    const dx = e.changedTouches[0].clientX - s.startX;
+    const dy = e.changedTouches[0].clientY - s.startY;
+    if (Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dx) < Math.abs(dy)) return;
     if (dx > 0) goPrev();
     else goNext();
   }
+
+  /* ---------- 鼠标拖动（桌面，scale > 1 时） ---------- */
+  const mouseRef = useRef<{
+    startX: number;
+    startY: number;
+    startTx: number;
+    startTy: number;
+  } | null>(null);
+  function onMouseDown(e: React.MouseEvent) {
+    if (t.scale <= 1) return;
+    e.preventDefault();
+    mouseRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startTx: t.tx,
+      startTy: t.ty,
+    };
+  }
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      const m = mouseRef.current;
+      if (!m) return;
+      setT((prev) => ({
+        scale: prev.scale,
+        tx: m.startTx + (e.clientX - m.startX),
+        ty: m.startTy + (e.clientY - m.startY),
+      }));
+    }
+    function onUp() {
+      mouseRef.current = null;
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  /* ---------- 双击切换 1x / ZOOM_STEP ---------- */
+  function onDoubleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    const f = focalRelCenter(stageRef.current, e.clientX, e.clientY);
+    setT((prev) =>
+      prev.scale > 1 ? IDENTITY : zoomAround(prev, ZOOM_STEP, f.x, f.y),
+    );
+  }
+
+  const isZoomed = t.scale > 1;
 
   return (
     <div
@@ -153,19 +387,40 @@ function Lightbox({
       aria-label="原图查看"
       onClick={onClose}
     >
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose();
-        }}
-        aria-label="关闭"
-        className="absolute right-3 top-3 z-[2] flex size-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
-      >
-        <X className="size-5" />
-      </button>
+      {/* 顶部右侧操作条：倍率 + 复位 + 关闭 */}
+      <div className="absolute right-3 top-3 z-[2] flex items-center gap-2">
+        {isZoomed ? (
+          <>
+            <span className="rounded-full bg-white/10 px-2 py-1 text-xs font-medium text-white">
+              {t.scale.toFixed(1)}×
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                reset();
+              }}
+              aria-label="复位 (键盘 0)"
+              className="flex size-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
+            >
+              <RotateCcw className="size-5" />
+            </button>
+          </>
+        ) : null}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
+          aria-label="关闭"
+          className="flex size-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
+        >
+          <X className="size-5" />
+        </button>
+      </div>
 
-      {index > 0 ? (
+      {!isZoomed && index > 0 ? (
         <button
           type="button"
           onClick={(e) => {
@@ -179,7 +434,7 @@ function Lightbox({
         </button>
       ) : null}
 
-      {index < total - 1 ? (
+      {!isZoomed && index < total - 1 ? (
         <button
           type="button"
           onClick={(e) => {
@@ -193,19 +448,44 @@ function Lightbox({
         </button>
       ) : null}
 
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={`/api/uploads-preview?p=${encodeURIComponent(paths[index])}`}
-        alt={paths[index]}
-        className="max-h-[92vh] max-w-[95vw] select-none object-contain"
+      {/* stage：吃掉 wheel / touch / 拖动；不要给它 onClick={onClose}，
+          否则双击触发的 dbl click 会同时被 dialog 的 onClick 关掉 */}
+      <div
+        ref={stageRef}
+        className="relative flex size-full items-center justify-center overflow-hidden"
         onClick={(e) => e.stopPropagation()}
+        onDoubleClick={onDoubleClick}
         onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
-        draggable={false}
-      />
+        onMouseDown={onMouseDown}
+        style={{
+          // touchAction:none 才能截获原生 pinch / 横向 pan，自己接管
+          touchAction: "none",
+          cursor: isZoomed
+            ? mouseRef.current
+              ? "grabbing"
+              : "grab"
+            : "zoom-in",
+        }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={`/api/uploads-preview?p=${encodeURIComponent(paths[index])}`}
+          alt={paths[index]}
+          className="max-h-[92vh] max-w-[95vw] select-none object-contain"
+          draggable={false}
+          style={{
+            transform: `translate3d(${t.tx}px, ${t.ty}px, 0) scale(${t.scale})`,
+            transformOrigin: "center center",
+            transition: touchRef.current || mouseRef.current ? "none" : "transform 0.15s ease-out",
+            willChange: "transform",
+          }}
+        />
+      </div>
 
       {total > 1 ? (
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white">
+        <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white">
           {index + 1} / {total}
         </div>
       ) : null}
