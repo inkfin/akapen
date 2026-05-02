@@ -339,11 +339,18 @@ export async function gradeSubmissionsAction(
       if (actionType === "followup" && optimizePrompt) {
         ctxParts.push(
           [
-            "额外任务（仅本次生效）：请在输出里补充 prompt_suggestion 字段，帮助老师优化题目级提示词。",
+            "额外任务：prompt_suggestion（仅本次生效）",
+            "请在输出 JSON 中补充 `prompt_suggestion` 字段，帮助老师优化题目级提示词。",
+            "schema：",
+            "{",
+            '  "reason": "<为什么建议改 prompt>",',
+            '  "suggested_rubric": "<可选：建议替换后的题目给分细则>",',
+            '  "suggested_feedback_guide": "<可选：建议替换后的修改意见方向>"',
+            "}",
             "要求：",
             "- 只建议题目级字段，不要改系统全局模板",
-            "- 用结构化对象：{reason, suggested_rubric, suggested_feedback_guide}",
-            "- 如果你判断现有 prompt 已足够清晰，也可省略该字段",
+            "- 如果建议里某个字段不需要改，可以省略该键",
+            "- 如果你判断现有 prompt 已足够清晰，也可省略整个 prompt_suggestion 字段",
           ].join("\n"),
         );
       }
