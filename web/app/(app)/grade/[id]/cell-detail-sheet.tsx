@@ -20,6 +20,7 @@ import { FeedbackMarkdown } from "@/components/feedback-markdown";
 import { StudentImageGrid } from "@/components/student-image-grid";
 
 import type { CellState } from "@/lib/grade-data";
+import { parseSuggestion } from "@/lib/prompt-suggestion";
 
 type Props = {
   batchId: string;
@@ -71,12 +72,6 @@ export function CellDetailSheet({
   const [historyFilter, setHistoryFilter] = useState<"all" | "model_answer">("all");
   const [optimizePrompt, setOptimizePrompt] = useState(false);
 
-  type ParsedSuggestion = {
-    reason: string | null;
-    suggestedRubric: string | null;
-    suggestedFeedbackGuide: string | null;
-  };
-
   type HistoryItem = {
     gradingTaskId: string;
     revision: number;
@@ -89,35 +84,6 @@ export function CellDetailSheet({
     updatedAt: string;
     hasModelAnswer: boolean;
   };
-
-  function parseSuggestion(raw: string | null): ParsedSuggestion | null {
-    if (!raw) return null;
-    try {
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const reason =
-        typeof parsed.reason === "string" && parsed.reason.trim()
-          ? parsed.reason.trim()
-          : null;
-      const suggestedRubric =
-        typeof parsed.suggested_rubric === "string"
-          ? parsed.suggested_rubric.trim() || null
-          : typeof parsed.suggestedRubric === "string"
-            ? parsed.suggestedRubric.trim() || null
-            : null;
-      const suggestedFeedbackGuide =
-        typeof parsed.suggested_feedback_guide === "string"
-          ? parsed.suggested_feedback_guide.trim() || null
-          : typeof parsed.suggestedFeedbackGuide === "string"
-            ? parsed.suggestedFeedbackGuide.trim() || null
-            : null;
-      if (!reason && !suggestedRubric && !suggestedFeedbackGuide) return null;
-      return { reason, suggestedRubric, suggestedFeedbackGuide };
-    } catch {
-      const text = raw.trim();
-      if (!text) return null;
-      return { reason: text, suggestedRubric: null, suggestedFeedbackGuide: null };
-    }
-  }
 
   // 详情抽屉打开 + 已 succeeded 时按需拉一次完整 result。
   // 没用 refetchInterval：result 拿到就不会变（重批走新 GradingTask），
@@ -192,7 +158,7 @@ export function CellDetailSheet({
       qc.invalidateQueries({ queryKey: ["grade-board", batchId] });
       qc.invalidateQueries({ queryKey: ["grade-history", cell.submissionId] });
       setFollowupText("");
-      if (vars?.actionType === "followup") setOptimizePrompt(false);
+      setOptimizePrompt(false);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -223,6 +189,8 @@ export function CellDetailSheet({
           .filter(Boolean)
           .join(" + ")}）`,
       );
+      qc.invalidateQueries({ queryKey: ["grade-result", cell.latest?.gradingTaskId] });
+      qc.invalidateQueries({ queryKey: ["grade-history", cell.submissionId] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -607,7 +575,10 @@ export function CellDetailSheet({
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => applySuggestionMut.mutate()}
+                      onClick={() => {
+                        if (!window.confirm("将用 AI 建议覆盖当前题目规则，是否继续？")) return;
+                        applySuggestionMut.mutate();
+                      }}
                       disabled={applySuggestionMut.isPending}
                     >
                       {applySuggestionMut.isPending ? "应用中…" : "应用到本题"}
