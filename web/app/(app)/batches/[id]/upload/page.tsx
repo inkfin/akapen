@@ -50,7 +50,7 @@ export default async function UploadPickStudentPage({
         <div>
           <h1 className="text-lg font-semibold">{batch.title}</h1>
           <p className="text-sm text-muted-foreground">
-            选择学生 → 拍照上传
+            选择学生 → 上传图片
           </p>
         </div>
       </div>

@@ -240,7 +240,6 @@ export function QuestionUploader({
         ref={inputRef}
         type="file"
         accept={UPLOAD_ACCEPT}
-        capture="environment"
         multiple
         className="hidden"
         onChange={handlePick}
@@ -256,7 +255,7 @@ export function QuestionUploader({
         ) : (
           <Camera className="size-4" />
         )}
-        {uploading ? "上传中..." : "拍照 / 选图上传"}
+        {uploading ? "上传中..." : "拍照 / 上传图片"}
       </Button>
     </div>
   );

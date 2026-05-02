@@ -76,7 +76,7 @@ export default async function BatchDetailPage({
         <div className="flex gap-2">
           <Button asChild variant="outline">
             <Link href={`/batches/${batch.id}/upload`}>
-              <Smartphone className="size-4" /> 移动端上传
+              <Smartphone className="size-4" /> 上传
             </Link>
           </Button>
           <Button asChild variant="outline">
