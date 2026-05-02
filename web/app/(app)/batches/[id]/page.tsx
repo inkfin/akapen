@@ -100,15 +100,15 @@ export default async function BatchDetailPage({
           </p>
         </CardHeader>
         <CardContent>
-        <BatchSettingsForm
-          batch={{
-            id: batch.id,
-            title: batch.title,
-            notes: batch.notes,
-            batchSubject: batch.batchSubject,
-            batchObjective: batch.batchObjective,
-          }}
-        />
+          <BatchSettingsForm
+            batch={{
+              id: batch.id,
+              title: batch.title,
+              notes: batch.notes,
+              batchSubject: batch.batchSubject,
+              batchObjective: batch.batchObjective,
+            }}
+          />
         </CardContent>
       </Card>
 

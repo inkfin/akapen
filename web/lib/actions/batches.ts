@@ -149,6 +149,18 @@ const questionCreate = z
         message: "需要打分时，给分细则不能为空",
       });
     }
+    const normalizedThinking = val.thinkingOverride.trim().toLowerCase();
+    if (
+      normalizedThinking !== "" &&
+      normalizedThinking !== "force_on" &&
+      normalizedThinking !== "force_off"
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["thinkingOverride"],
+        message: "思考模式覆盖只能是 force_on / force_off 或留空",
+      });
+    }
   });
 
 export async function upsertQuestionAction(
