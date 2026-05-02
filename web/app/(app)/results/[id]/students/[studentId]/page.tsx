@@ -10,6 +10,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { FeedbackMarkdown } from "@/components/feedback-markdown";
 import { StudentImageGrid } from "@/components/student-image-grid";
 import { auth } from "@/lib/auth";
 import {
@@ -280,9 +281,9 @@ function QuestionCard({ q }: { q: StudentReportQuestion }) {
             <div className="text-xs text-muted-foreground">
               评语 / 修改建议
             </div>
-            <div className="rounded-md border bg-muted/30 px-3 py-2 leading-relaxed whitespace-pre-wrap print:bg-transparent print:border-0 print:px-0">
+            <FeedbackMarkdown className="rounded-md border bg-muted/30 px-3 py-2 print:bg-transparent print:border-0 print:px-0">
               {q.result.feedback}
-            </div>
+            </FeedbackMarkdown>
           </section>
         ) : succeeded ? (
           <section className="text-xs text-muted-foreground italic">

@@ -13,6 +13,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { FeedbackMarkdown } from "@/components/feedback-markdown";
 import { StudentImageGrid } from "@/components/student-image-grid";
 
 import type { CellState } from "@/lib/grade-data";
@@ -135,7 +136,14 @@ export function CellDetailSheet({
         if (!o) onClose();
       }}
     >
-      <SheetContent className="overflow-y-auto">
+      {/*
+        宽度策略：
+        - 手机（默认）：占满（继承 ui/sheet.tsx 的 w-full max-w-md）
+        - 平板 sm/md：~640~768px，让维度表 + feedback 不挤
+        - 桌面 lg/xl：~960~1120px，老师能边看大盘边看详情，不浪费宽屏
+        cn() 用 tailwind-merge，下面这串 max-w-* 会覆盖基础组件的 sm:max-w-lg。
+      */}
+      <SheetContent className="overflow-y-auto sm:max-w-xl md:max-w-2xl lg:max-w-3xl xl:max-w-4xl">
         <SheetHeader>
           <SheetTitle>
             {student.name}（{student.externalId}） · 第 {question.index} 题
@@ -226,9 +234,9 @@ export function CellDetailSheet({
                 <div className="text-sm font-medium">
                   {hasScore ? "评语 / 改进建议" : "修改建议"}
                 </div>
-                <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed">
+                <FeedbackMarkdown className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
                   {result.feedback}
-                </div>
+                </FeedbackMarkdown>
               </section>
             ) : null}
             {result && result.dimensionScores.length > 0 ? (
