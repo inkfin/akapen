@@ -144,10 +144,11 @@ const questionCreate = z
         message: "需要打分时，给分细则不能为空",
       });
     }
+    const normalizedThinking = val.thinkingOverride.trim().toLowerCase();
     if (
-      val.thinkingOverride.trim() !== "" &&
-      val.thinkingOverride !== "force_on" &&
-      val.thinkingOverride !== "force_off"
+      normalizedThinking !== "" &&
+      normalizedThinking !== "force_on" &&
+      normalizedThinking !== "force_off"
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

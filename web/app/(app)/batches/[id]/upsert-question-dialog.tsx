@@ -190,6 +190,11 @@ export function UpsertQuestionDialog({
             name="requireGrading"
             value={requireGrading ? "true" : "false"}
           />
+          <input
+            type="hidden"
+            name="provideModelAnswer"
+            value={provideModelAnswer ? "true" : "false"}
+          />
           <div className="grid gap-2">
             <Label htmlFor="index">题号</Label>
             <Input
@@ -361,7 +366,6 @@ export function UpsertQuestionDialog({
                   <div className="flex items-start gap-3">
                     <Checkbox
                       id="provideModelAnswer"
-                      name="provideModelAnswer"
                       checked={provideModelAnswer}
                       onCheckedChange={(v) => setProvideModelAnswer(v === true)}
                     />

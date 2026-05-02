@@ -208,14 +208,6 @@ export async function gradeSubmissionsAction(
       // requireGrading=false 时不重复带"给分细则"段，避免 prompt 自相矛盾；
       // feedbackGuide 留空时也省略，让模型自己用默认 feedback 方向。
       const ctxParts: string[] = [sub.question.prompt];
-      const subject = (sub.question.batch.subject ?? "").trim();
-      const objective = (sub.question.batch.batchObjective ?? "").trim();
-      if (subject || objective) {
-        const lines: string[] = [];
-        if (subject) lines.push(`作业学科：${subject}`);
-        if (objective) lines.push(`作业目标：${objective}`);
-        ctxParts.push(lines.join("\n"));
-      }
       if (sub.question.requireGrading && sub.question.rubric && sub.question.rubric.trim()) {
         ctxParts.push(`本题给分细则：\n${sub.question.rubric.trim()}`);
       }
