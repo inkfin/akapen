@@ -48,11 +48,16 @@ export function QuestionUploader({
   const [reordering, setReordering] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // 全局"有写操作进行中"锁。任何写（拖动 / 删除 / 上传）期间禁掉其他写，
+  // 避免乐观更新交叉返回时出现"旧响应覆盖新状态"的 race。
+  const busy = pending || uploading || reordering;
+
   // dnd-kit sensors：
   // - MouseSensor 桌面：移动 8px 才触发拖动 → 单击删除按钮 / 单击点开图都不会
   //   被吞，门槛稳。
-  // - TouchSensor 移动：长按 200ms（容差 5px）才触发 → 老师在缩略图条上做"上
-  //   下滑动滚页面"的手势不会误启动拖动；想拖动得明确按住一会。
+  // - TouchSensor 移动：长按 200ms（容差 5px）才触发 → 老师在拖把手上要明确
+  //   长按才进入排序模式。注意：listeners 只挂在专用 drag handle 上（不挂在
+  //   缩略图本体），这样从缩略图本体开始的 swipe 仍然能正常滚页。
   // - KeyboardSensor：a11y 必备，`Tab` 选中 + `Space` 抓起 + 方向键移动 +
   //   `Space` 放下；不影响主流程但能过 lighthouse / 屏幕阅读器场景。
   const sensors = useSensors(
@@ -138,23 +143,17 @@ export function QuestionUploader({
   }
 
   /**
-   * 拖拽结束：optimistic 更新本地顺序 → fire-and-forget PATCH 后端。
-   * 失败回滚 + toast，让老师知道顺序没保存（避免它以为成了下次进来又错乱）。
+   * 拖拽结束：optimistic 更新本地顺序 → PATCH 后端（带 previousImagePaths
+   * 做乐观锁）。PATCH 期间 `busy` 为 true，整个区域禁止再次写操作（拖动 /
+   * 删除 / 上传都被禁），等回包后再放开。
+   *
+   * 失败：
+   *   - 409 + server 返回的最新 imagePaths：用 server 的为准（说明有别人改过）；
+   *   - 其他错误：回滚到拖动前的旧顺序 + toast 让老师知道没保存。
    */
   async function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    if (!submissionId) {
-      // 还没上传过、没 submissionId 时不该出现拖动（缩略图条都没渲染）；
-      // 防御性处理：直接更新本地，不发请求。
-      setPaths((cur) => {
-        const oldIdx = cur.indexOf(String(active.id));
-        const newIdx = cur.indexOf(String(over.id));
-        if (oldIdx < 0 || newIdx < 0) return cur;
-        return arrayMove(cur, oldIdx, newIdx);
-      });
-      return;
-    }
 
     const prev = paths;
     const oldIdx = prev.indexOf(String(active.id));
@@ -162,20 +161,34 @@ export function QuestionUploader({
     if (oldIdx < 0 || newIdx < 0) return;
     const next = arrayMove(prev, oldIdx, newIdx);
     setPaths(next);
+
+    if (!submissionId) return; // 还没建 submission，不发请求
     setReordering(true);
     try {
       const res = await fetch("/api/upload", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ submissionId, imagePaths: next }),
+        body: JSON.stringify({
+          submissionId,
+          previousImagePaths: prev,
+          imagePaths: next,
+        }),
       });
+      const j = (await res.json().catch(() => ({}))) as {
+        imagePaths?: string[];
+        error?: string;
+      };
+      if (res.status === 409 && Array.isArray(j.imagePaths)) {
+        // 别人抢先改了：以 server 为准，告诉老师刷新过
+        setPaths(j.imagePaths);
+        toast.error(j.error ?? "图序已被更新，已刷新为最新顺序");
+        return;
+      }
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
         throw new Error(j.error ?? `HTTP ${res.status}`);
       }
-      // server 回的 imagePaths 应该跟 next 完全一致；信 server 的避免漂移
-      const j = (await res.json()) as { imagePaths: string[] };
-      setPaths(j.imagePaths);
+      // 成功：信 server 的 imagePaths 避免漂移
+      if (Array.isArray(j.imagePaths)) setPaths(j.imagePaths);
     } catch (err) {
       setPaths(prev);
       toast.error(err instanceof Error ? err.message : "保存顺序失败");
@@ -199,19 +212,20 @@ export function QuestionUploader({
                   <SortableThumbnail
                     key={p}
                     id={p}
-                    disabled={pending}
+                    disabled={busy}
                     onDelete={() => handleDelete(p)}
                   />
                 ))}
               </div>
             </SortableContext>
           </DndContext>
-          {/* 提示行 —— 只在有 ≥2 张图时出现，避免占用屏幕。文案分桌面 / 移动 */}
           {paths.length >= 2 ? (
             <p className="text-xs text-muted-foreground">
-              拖动缩略图调整顺序{reordering ? "（保存中…）" : ""}
-              <span className="hidden md:inline">；桌面端按住拖把手或缩略图本体即可</span>
-              <span className="md:hidden">；手机长按缩略图后再拖动</span>
+              {reordering ? "保存顺序中…" : "拖动左上角拖把手调整顺序"}
+              <span className="hidden md:inline">
+                ；桌面端按住拖把手移动 8px 即触发
+              </span>
+              <span className="md:hidden">；手机长按拖把手 200ms 后再拖动</span>
             </p>
           ) : null}
         </>
@@ -234,7 +248,7 @@ export function QuestionUploader({
       <Button
         type="button"
         onClick={() => inputRef.current?.click()}
-        disabled={uploading}
+        disabled={busy}
         className="min-h-11 w-full"
       >
         {uploading ? (
@@ -249,8 +263,13 @@ export function QuestionUploader({
 }
 
 /**
- * 可拖动的缩略图。listeners 只挂在缩略图本体（包括左上角拖把手），**不**挂
- * 在删除按钮上 —— 删除按钮要保持「单击 = 删除」语义，不被拖动 sensor 拦截。
+ * 可拖动的缩略图。**关键设计**：拖动 listeners 只挂在左上角专用 drag handle
+ * 上，**不**挂在缩略图本体 —— 这样从缩略图开始的纵向 swipe 仍然能正常滚页面
+ * （`touch-action: none` 同样只加在 handle 上）。这是 dnd-kit 官方推荐的做法
+ * （详见 docs/sensors/touch-action）。
+ *
+ * 副作用：老师必须精确瞄准左上角小拖把手才能拖动 —— 所以 handle 始终可见
+ * 且做大点（24×24px = 推荐最小触控目标），不用 hover 隐藏。
  *
  * `onError` 兜底是为了万一有历史 `.heic` 文件遗留在库里（或浏览器拉图临时
  * fail），不至于让老师看到一堆破图 icon —— 显示一个占位 + 文件名末段，照样
@@ -265,6 +284,8 @@ function SortableThumbnail({
   disabled: boolean;
   onDelete: () => void;
 }) {
+  // disabled 时不响应拖动 sensor activation；外层 busy（PATCH/DELETE/POST 进行
+  // 中）会传 disabled=true 防并发写。
   const {
     attributes,
     listeners,
@@ -272,15 +293,12 @@ function SortableThumbnail({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, disabled });
   const [broken, setBroken] = useState(false);
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
-    // 拖动中提一层 z-index + 半透明，提示这是被抓起的；touchAction:none 必加，
-    // 否则 iOS Safari 触摸时浏览器的"惯性滚动"会跟我们的拖动手势打架。
-    touchAction: "none",
     zIndex: isDragging ? 10 : undefined,
     opacity: isDragging ? 0.85 : 1,
   };
@@ -289,18 +307,8 @@ function SortableThumbnail({
     <div
       ref={setNodeRef}
       style={style}
-      // listeners + attributes 挂在 wrapper 上，让整个缩略图都能"按住拖动"，
-      // 不需要老师精确瞄准小拖把手。删除按钮内部 e.stopPropagation 隔离。
-      {...attributes}
-      {...listeners}
-      className="relative size-20 cursor-grab touch-none overflow-hidden rounded-md border bg-muted active:cursor-grabbing"
+      className="relative size-20 overflow-hidden rounded-md border bg-muted"
     >
-      {/* 左上角拖把手提示 —— 桌面 hover 时显示，让用户知道"这能拖"；移动端
-          长按本身就有触觉反馈，不需要常驻 icon。 */}
-      <div className="pointer-events-none absolute left-1 top-1 z-[1] hidden rounded bg-black/40 p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100 md:block md:group-hover:opacity-100">
-        <GripVertical className="size-3" />
-      </div>
-
       {broken ? (
         <div className="flex size-full flex-col items-center justify-center gap-1 px-1 text-muted-foreground">
           <ImageOff className="size-5" />
@@ -318,19 +326,42 @@ function SortableThumbnail({
           src={`/api/uploads-preview?p=${encodeURIComponent(id)}`}
           alt={id}
           draggable={false}
-          className="pointer-events-none size-full object-cover select-none"
+          className="pointer-events-none size-full select-none object-cover"
           onError={() => setBroken(true)}
         />
       )}
-      {/*
-        删除按钮 —— 始终可见。**不要用 group-hover** 隐藏：触屏设备没有
-        hover 状态，老师在手机上根本点不到。size-6 = 24px touch target
-        在 size-20 缩略图右上角刚好够大；半透明黑底 + 红 X 在彩色照片上
-        也辨识度足够。
 
-        关键：onPointerDown e.stopPropagation 隔离 —— 否则按下删除按钮也
-        会触发 dnd-kit 的 sensor activation，导致"想点删除却开始拖动"。
-        这跟 dnd-kit 官方文档 `useSortable` 推荐做法一致。
+      {/*
+        左上角 drag handle —— **只有这里**装拖动 listeners 和 touch-action:none。
+        始终可见（不 hover-only），24×24 触控目标够大；半透明黑底 + 拖动 icon
+        在彩色照片上辨识度足够。
+
+        - touch-action:none 让 TouchSensor 能 preventDefault 早期 touchmove，
+          否则浏览器在 ~100ms 内自己决定 scroll vs tap，TouchSensor 来不及拦。
+          仅限于这个 24×24 小区域，不影响整张缩略图的 swipe 滚页行为。
+        - cursor:grab / active:grabbing 给桌面用户视觉反馈。
+        - disabled（busy）时不挂 listeners，禁用 cursor 提示，老师能看出"现在
+          不能拖"。
+      */}
+      <button
+        type="button"
+        aria-label="拖动调整顺序"
+        disabled={disabled}
+        {...attributes}
+        {...(disabled ? {} : listeners)}
+        className="absolute left-1 top-1 z-[2] flex size-6 cursor-grab items-center justify-center rounded bg-black/60 text-white transition-opacity hover:bg-black/80 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50"
+        style={{ touchAction: "none" }}
+      >
+        <GripVertical className="size-3.5" />
+      </button>
+
+      {/*
+        删除按钮 —— 始终可见。**不要用 group-hover** 隐藏：触屏设备没有 hover
+        状态，老师在手机上根本点不到。size-6 = 24px 触控目标够大。
+
+        关键：onPointerDown e.stopPropagation 隔离 —— 防止跟外层任何 pointer
+        监听打架（虽然 wrapper 已没装 listeners，但保留这一层防御为了将来如果
+        有人把 listeners 加回去时不踩坑）。
       */}
       <button
         type="button"
